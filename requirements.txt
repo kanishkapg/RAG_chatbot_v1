@@ -1,0 +1,7 @@
+paddleocr
+langchain
+streamlit
+chromadb
+openai
+faiss-cpu
+python-dotenv
