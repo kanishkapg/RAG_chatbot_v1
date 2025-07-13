@@ -1,0 +1,2 @@
+https://codesphere.com/articles/smart-chat-rag-building-document-aware-conversational-ai
+https://coralogix.com/ai-blog/step-by-step-building-a-rag-chatbot-with-minor-hallucinations/
