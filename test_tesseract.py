@@ -2,7 +2,6 @@ import pytesseract
 from pdf2image import convert_from_path
 import os
 
-# pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'  # Comment out on Linux/Mac
 
 def extract_text_from_pdf(pdf_path, output_txt_path="output_tesseract.txt"):
     images = convert_from_path(pdf_path, dpi=300)
