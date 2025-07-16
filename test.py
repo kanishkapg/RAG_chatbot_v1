@@ -7,7 +7,7 @@ from groq import Groq
 import os
 from dotenv import load_dotenv
 
-load_dotenv('.env')
+load_dotenv('.env', override=True)
 
 loader = TextLoader("output_tesseract.txt")
 documents = loader.load()
@@ -59,7 +59,7 @@ client.upsert(
     points=points
 )
 
-query = "Which act governs the appointment of Directors for Institutes or Centres for Higher Learning?"
+query = "Why might the University Grants Commission have decided to repeal and replace Circular No. 10/2022?"
 query_embedding = model.encode(query).tolist()
 
 hits = client.query_points(
