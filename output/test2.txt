@@ -1,0 +1,657 @@
+--- Document Metadata: test2.pdf ---
+title: StudyMate User Guide Smart Study Timer Platform – Web & Mobile Prepared for: Mr. Charuka Moremada By: Team StudyMate
+author: theekshana wanniarachchi
+subject: 
+creator: Canva
+producer: Canva
+creation_date: 2025-05-04 21:43
+modification_date: 2025-05-04 21:42
+pages: 16
+filename: test2.pdf
+file_size_kb: 4746.4
+
+----- test2.pdf: Page 1 -----
+     
+      
+   
+
+StudyMate USER GUIDE
+
+ 
+
+Smart Study Timer Platform — Web & Mobile
+
+Tick Tock, Study
+Rock
+
+Welcome to StudyMate!
+
+Take control of your study time with our innovative app. Join
+us for a smarter, more engaging way to study and achieve
+Talbert ome Orel
+
+ee Get Started Free
+
+i
+
+ 
+
+Prepared for: Mr. Charuka Moremada By: Group 33
+— | _
+
+ 
+
+
+----- test2.pdf: Page 2 -----
+1. Introduction
+
+ 
+  
+ 
+
+   
+
+co
+
+StudyMate is a productivity tool designed to help students manage their study time more
+effectively using the Pomodoro technique. It breaks study sessions into focused intervals with
+regular breaks, helping users maintain concentration and avoid burnout.
+
+ 
+
+Welcome to the StudyMate User Guide.
+
+In addition to helping students focus, StudyMate also allows parents to monitor their child's
+study progress through a linked dashboard. Our app is available on both web and mobile
+platforms, making it easy to use anytime, anywhere.
+
+This guide will walk you through how to install, navigate, and use the main features of the app.
+Whether you are a student aiming to improve your study habits or a parent wanting to support
+your child's academic journey, this guide will help you get started.
+
+
+----- test2.pdf: Page 3 -----
+2. = System Requirements
+
+To use StudyMate smoothly, please make sure your device meets the following requirements.
+) For Web App
+e Browser: Latest version of Google Chrome, Mozilla Firefox, Microsoft Edge, or Safari
+e Operating System: Windows 10 or higher, macOS 10.12 or higher.
+e Internet Connection: Stable internet connection is required for login, timer synchronization,
+quiz access, and data saving
+e Screen Resolution: Minimum 1024x768 recommended for best user experience
+
+[] For Mobile App
+e Storage Space: At least 100MB of free space
+e RAM: Minimum 2GB RAM recommended for smooth performance
+e Internet Access: Required for account login, timer synchronization, quiz access, and
+progress tracking
+! Note: The StudyMate mobile app is currently under development and will be released soon.
+
+
+----- test2.pdf: Page 4 -----
+3. L_) Glossary
+
+Below are some common terms used throughout the StudyMate platform:
+e Pomodoro — A focused study session, typically 25 minutes long, based on the Pomodoro Technique.
+e Short Break — A 5-minute break taken after completing a Pomodoro session.
+e Long Break — A longer rest period (usually 15-30 minutes) after completing four Pomodoro sessions.
+e To-Do List — A feature that allows users to organize and manage tasks by date and category.
+e Student ID — A unique code generated for each student that can be used by parents to monitor their
+
+progress.
+
+e Parent Dashboard — A section where parents can track their child's study activity, quiz results, and
+progress.
+
+e Evaluation Form — A short reflection form filled out after each Pomodoro session to encourage self-
+assessment.
+
+¢ Quiz Section — A feature where students can access subject-related quizzes (available to paid users).
+
+e Achievements — Rewards or badges earned by students for consistent study habits or special
+milestones.
+
+e Distraction Alert — A notification or sound that triggers when the user switches tabs or gets distracted
+during a session.
+
+
+----- test2.pdf: Page 5 -----
+4. ») User Access Information
+
+©) Web Access
+Visit: https://study-mate-amber.vercel.app
+Or simply scan the QR code below to open the website on your device.
+
+ 
+
+ 
+
+L) Mobile App
+“2 The mobile version (Android & iOS) is currently under development and will be released soon.
+
+/ Demo Account Credentials
+You can use the following demo accounts to explore the system:
+
+Roel’ «SSSS*S*«i sO
+user12@gmail.com 123456
+
+parent1 @gmail.com 123456
+admin6@gmail.com 123456
+
+ 
+
+Users can also create a new account by selecting Sign Up on the login page and choosing their role (Student or
+Parent).
+
+
+----- test2.pdf: Page 6 -----
+4. & How to Use Specific Features
+
+Il. Side Panel Navigation
+The Side Panel helps users easily move between different parts of the StudyMate platform. It stays visible
+on the side of the screen for quick access
+
+ 
+
+Dashboard - View your study progress, achievements, and reports.
+Home - Takes you to the welcome/home page.
+
+Timer —- Opens the Smart Study Timer to start your sessions.
+
+To-Do List - Add, edit, and manage your tasks and priorities.
+
+Quiz — Access available quizzes (if paid).
+
+|
+
+© f \ © & o0oe
+
+Notifications — View alerts and messages from the StudyMate team.
+|
+
+Logout Button - To safely exit your account
+
+cD
+
+|
+? FAQ - Check frequently asked questions or report issues.
+
+iS)
+
+
+----- test2.pdf: Page 7 -----
+lil. © Smart Timer
+The Smart Timer is the core feature of StudyMate, designed to help users manage their study time
+effectively using the Pomodoro technique. Here's how to use it:
+
+Me study-mate-e2cie45j7-tharunethus-projects.vercel.app ,” a
+Ce
+
+If a user switches tabs during a study -ianenenenall Users can upload a music file
+session, the app plays a sound alert and listen to it while studying.
+reminding them to stay focused
+
+ 
+  
+ 
+ 
+
+   
+
+     
+
+Pomodoros
+
+ 
+
+Users can customize sessions a the "Extend by 10 Minutes" button if you
+
+ 
+
+need extra time.
+
+Manage To-do List
+
+c= 008
+Z
+
+>y-= Start, Pause, and Stop
+
+ 
+
+ 
+
+
+----- test2.pdf: Page 8 -----
+iii, -- Pomodoro Review Form
+The Por lew Form is designed to help you assess your study sessions and earn points based on
+your s
+
+  
+  
+
+StudyMate
+
+Q. Quick Self-Check: Review Your Pomodoro Session!
+
+   
+ 
+ 
+
+1. How focused were you during this session?
+
+wo6Y6UMmlUlUUCUW
+
+2. How productive was your study session?
+
+wv o6WO6UCUMNlUlUCUO
+
+3. How much did you understand from what you studied?
+
+ww OUwWwlUMUlU
+
+   
+  
+  
+
+4. What did you do during this Pomodoro session?
+
+Descnibe your study session...
+
+5. How many Pomodoros did you use for this task?
+
+ES
+
+
+----- test2.pdf: Page 9 -----
+iv. 2 To-Do List
+The To-Do List feature helps users organize and manage their tasks effectively.
+
+Manage Your To-Do List 3
+Sorting Tasks.
+
+Tasks All Tasks
+
+@ All Tasks 6
+Programming vwvv
+
+      
+   
+   
+     
+  
+    
+
+         
+
+ 
+
+> Upcoming 0
+
+re List: Work
+
+= (\ Today fh)
+
+@ Due Date: 2025-03-05
+= Calendar Priority Level: medium
+
+©
+
+ra Lists * A wW
+@ Personal 2
+
+[ua
+
+BB Wor Java
+
+      
+   
+   
+
+2
+
+ 
+  
+
+cm CB Study 3 List: Study «_V
+Due Date: 2025-03-06
+
+¥ = Important Tasks Priority
+
+© cone ss sewn Delete atask.
+we @w
+
+Clean the room
+List: Personal
+Due Date: 2025-02-21
+Priority Level: high
+
+Cub_tselbe Tahnla
+
+  
+
++ Set Your Tasks
+
+Description
+
++ Add a Description about the Task
+
+ 
+
+Personal
+
+POUPLALPL
+Puy Per PF
+FFF
+
+  
+
+Sub Tasks + Add a subtask
+
+  
+
+Prioritized Level Low v
+
+Add Task
+
+
+----- test2.pdf: Page 10 -----
+V. «= Quizzes
+The Quiz feature allows students to test their knowledge and track their learning progress.
+
+StudyMate
+
+Welcome to the Quiz Zone!
+
+ 
+ 
+
+Unlock Premium Quiz
+=%
+Access bs designed to test your knowledge and help you track your progress. We're proud to collaborate with ClassMarker.com to deliver
+
+Pay just $2.5 to access exclusive quizzes and track
+
+your performance. ked to yours, they will also be able to view your quiz results through their dashboard.
+
+Can't see the payment options? Please refresh the ddyMate
+
+age.
+peg me to begin.
+
+  
+  
+
+core and correct answers after finishin
+It URL to revisit anytime.
+
+st here.
+
+Lesson 2 Grade 6 Science Quiz - Lesson 1 studymate_trial_quiz
+View Previous Quiz Results
+
+[> Drs) iae ear sl eerie
+
+Powered by PayPal
+
+ 
+
+atti ees fsl0lc* Mal c*Fap at) [esse [On ra) PoC To!
+G / s /
+
+    
+
+
+----- test2.pdf: Page 11 -----
+vi. 1! Student Dashboard
+The Student Dashboard is your personal space where you can view your progress, achievements, and
+detailed study information.
+
+[2 Export Data
+
+Hello user12, Let's Check Out Your Progress!
+
+ASAT NT MAE
+
+You can export your full progress report as a PDF
+
+ 
+
+Personal Details Task Progress Pomodoro Sessions
+
+Name Email | G 2 /6 61 Oh otal
+userl2 userl2@gmail.com A) Total mnodoro
+Student ID Tasks Lao © Completed 14m rom ‘
+uaen 0 e
+5 pnt Earn this achievement based on the total
+
+Early Bird: Earn this achievement if you study
+between 4 AM to 8 AM for 5 days a week.
+
+\
+
+i :)
+
+   
+
+ScTa te iias
+
+ 
+
+Night Owl Focus Pearl
+
+points from your Pomodoro session
+reviews. You must have more than 40
+points across multiple session evaluations
+to earn this badge.
+
+Night Owl: Earn this achievement if you study between 10 PM to 3 AM for 5 days a week. -
+
+
+----- test2.pdf: Page 12 -----
+vii. ; = Parent Dashboard
+The Parent Dashboard allows parents to monitor and track the progress of their child's study sessions.
+
+Se Hello Parent1, view your student's progress here.
+
+StudyMate
+
+ 
+    
+      
+
+ 
+ 
+
+To add a student, simply enter the Student ID
+
+View Your Student's Details \(enterstudentio_—) ar
+
+ee ee ee ee ee ee ee eee | ee ee ee ee stu
+
+     
+     
+
+New message from »® inbox x
+
+parents can view information for each added | ay swiwe cements se
+
+student. yy
+___. _..dents
+
+WL aaa al
+
+Hello Student,
+You got a new message from StudyMate:
+We are excited to inform you that parent Parent! from our community has added you as their student to monitor and support your study analytics through our platform
+
+If you are aware of this addition, no further action is required on your part. However, if you do not recognize this activity or have any concerns, please contact us immediately
+at http:/Mocalhost:5173/faq
+
+ 
+
+Thank you for being a valued part of our learning community!
+
+Best wishes,
+StudyMate team
+
+Email sent via EmailS com
+
+Once a student is added, the student will receive an email notifying them
+that they’ve been successfully linked to the parent account. The email will
+include the parent's name so the student knows who has linked them.
+
+ 
+
+
+----- test2.pdf: Page 13 -----
+viii. ? Frequently Asked Questions (FAQ)
+The FAQ section helps users find quick answers to common questions about using StudyMate.
+
+StudyMate
+
+  
+ 
+
+Frequently Asked Questio
+
+Facing any issues? Report it!
+
+ 
+
+1. What Is this app, and how can it help me?
+
+This app helps you manage your study sessions efficiently using features like Pomodoro timers, task management, progress tracking, and motivational quotes. It keeps you focus
+
+  
+
+and organized throughout your study routine.
+
+2. How do | set a study timer?
+Simply select the desired study session fram the timer options, or customize your own timer settings, and click “Start” to begin. You can pause and reset the timer whenever neec
+
+ 
+
+3. Can | track my study progress?
+
+Yes, the app offers visual progress tracking, showing your study hours, tasks completed, and overall progress.
+
+4. Can | set reminders for my study tasks?
+
+Yes, you can set reminders for each task to ensure you stay on track with your study goals.
+
+
+----- test2.pdf: Page 14 -----
+ 
+ 
+ 
+ 
+
+ard
+
+Admin Dashboard
+
+User Growth Trends
+
+12
+
+5185 /) Ma
+
+Total Users
+
+Jan 5 Jan7 Mar 13 Mar 18 Mar 21 Mar 22
+Date
+
+- Total Users mi New Users
+
+7
+
+  
+ 
+ 
+  
+
+Reported Issues
+
+User ID Category Details
+5xXbVUfHYSgmH9AIKWmDpNR828V2 Other Issues otherlssue: Alerts are not working properly
+3jLRGHVbVoNKpAhDa7hxPtjm8hd2 Request Quiz aah
+
+grade: Grade 10-11
+3jLRGHVbVoNKpAhDa7hxPtjm8hd2 App Issues applssue: Timer not working
+5xXbVUfHYSgmH9AIKWmDpNR828V2 App Issues applssue: To-Do List issue
+
+emailTime: 3.20 pm
+3jLRGHVbVoNKpAhDa7hxPtjm8hd2 Parent/Account Issues emailDate: 22/3/2025
+parentName: parent!
+
+Send Notification
+
+Message
+A
+Recipient Type
+All Users v
+Importance
+Normal v
+
+Send Notification
+
+ 
+
+Timestamp
+
+3/22/2025, 9:42:58 AM
+
+4/17/2025, 5:09:10 PM
+
+3/22/2025, 8:54:07 AM
+
+3/22/2025, 9:46:27 AM
+
+3/22/2025, 8:55:15 AM
+
+rovides administrators with full control over platform analytics, user communication,
+
+Add remarks
+
+Add remarks
+
+Add remarks
+
+Add remarks
+
+Parent did not answer
+
+ 
+
+
+----- test2.pdf: Page 15 -----
+5. & Troubleshooting
+
+lf you experience issues while using StudyMate, try the following solutions:
+
+ef Solution
+App not loading Check your internet connection and try again.
+Can't log in Make sure your email and password are entered correctly.
+
+Ensure you have completed the $2.50 lifetime quiz payment.
+
+Payment options not showing. Try reloading the page until the payment interface appears.
+Try refreshing the page or restarting the app.
+
+ 
+
+
+----- test2.pdf: Page 16 -----
+6. <. Support Contact Details
+
+lf youre unable to resolve your issue using the troubleshooting guide, feel free to reach out for help:
+e <Email: studymateapp3@gmail.com
+e & Phone: +94 71 057 1733
+e Website: https://study-mate-amber.vercel.app
+
+Were here to help you get the most out of your StudyMate experience!
+
+ 
+

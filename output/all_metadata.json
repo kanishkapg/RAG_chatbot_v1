@@ -1,0 +1,62 @@
+{
+  "circular1.pdf": {
+    "title": "",
+    "author": "",
+    "subject": "",
+    "creator": "TOSHIBA e-STUDIO3518A",
+    "producer": "SECnvtToPDF V1.0",
+    "creation_date": "2024-01-04 23:37",
+    "modification_date": "2024-01-05 11:46",
+    "pages": 9,
+    "filename": "circular1.pdf",
+    "file_size_kb": 308.28
+  },
+  "circular2.pdf": {
+    "title": "",
+    "author": "",
+    "subject": "",
+    "creator": "",
+    "producer": "",
+    "creation_date": "",
+    "modification_date": "",
+    "pages": 1,
+    "filename": "circular2.pdf",
+    "file_size_kb": 300.38
+  },
+  "circular3.pdf": {
+    "title": "",
+    "author": "",
+    "subject": "",
+    "creator": "",
+    "producer": "",
+    "creation_date": "",
+    "modification_date": "",
+    "pages": 2,
+    "filename": "circular3.pdf",
+    "file_size_kb": 434.22
+  },
+  "test1.pdf": {
+    "title": "",
+    "author": "Pasindu Kandanage",
+    "subject": "",
+    "creator": "Microsoft\u00ae Word for Microsoft 365",
+    "producer": "Microsoft\u00ae Word for Microsoft 365",
+    "creation_date": "2025-03-25 22:45",
+    "modification_date": "2025-03-25 22:45",
+    "pages": 3,
+    "filename": "test1.pdf",
+    "file_size_kb": 222.61
+  },
+  "test2.pdf": {
+    "title": "StudyMate User Guide Smart Study Timer Platform \u2013 Web & Mobile Prepared for: Mr. Charuka Moremada By: Team StudyMate",
+    "author": "theekshana wanniarachchi",
+    "subject": "",
+    "creator": "Canva",
+    "producer": "Canva",
+    "creation_date": "2025-05-04 21:43",
+    "modification_date": "2025-05-04 21:42",
+    "pages": 16,
+    "filename": "test2.pdf",
+    "file_size_kb": 4746.4
+  }
+}

@@ -1,4 +1,4 @@
---- Document Metadata ---
+--- Document Metadata: circular1.pdf ---
 title: 
 author: 
 subject: 
@@ -10,7 +10,7 @@ pages: 9
 filename: circular1.pdf
 file_size_kb: 308.28
 
------ Page 1 -----
+----- circular1.pdf: Page 1 -----
  
 
 UNIVERSITY GRANTS COMMISSION
@@ -62,7 +62,7 @@ Director.
 OR
 
 
------ Page 2 -----
+----- circular1.pdf: Page 2 -----
 (iv)
 
 (v)
@@ -125,7 +125,7 @@ Assistant Registrar/Assistant Registrar, who is the Secretary to the Board of
 Management of the Institute, immediately after publishing the advertisement
 
 
------ Page 3 -----
+----- circular1.pdf: Page 3 -----
 (viii)
 
 (ix)
@@ -195,7 +195,7 @@ in writing.
  
 
 
------ Page 4 -----
+----- circular1.pdf: Page 4 -----
 (xiii)
 
 (xiv)
@@ -268,7 +268,7 @@ relevant statutory bodies as specified in paragraph 3.(xxii), within three days
 from the date of the Special Meeting of the Board of Management.
 
 
------ Page 5 -----
+----- circular1.pdf: Page 5 -----
 (xxi)
 
 (xxii)
@@ -330,7 +330,7 @@ Any interpretation as to matters in this Circular or applicability of the Circul
 shall be decided by the UGC and any such decision of the UGC shall be final.
 
 
------ Page 6 -----
+----- circular1.pdf: Page 6 -----
 6 a
 
 4. Where the advertisement fails to find three applicants, the process shall begin afresh by
@@ -383,7 +383,7 @@ Copies: 1. Secretary to H.E. the President
 File No. UGC/HR/2/3/283
 
 
------ Page 7 -----
+----- circular1.pdf: Page 7 -----
 Annex |
 
 Assessment Scheme for the Board of Management for assessing Candidates for the Selection of a Director
@@ -421,7 +421,7 @@ Marks |
 Name of the BoM Member: ............:cesesseserereeceereeeeeceetteeeeees SIQMALULE! 0.0... ceeecsssensereeseneensensacssnsecassnesceneassatsetanseenteeedeaenas
 
 
------ Page 8 -----
+----- circular1.pdf: Page 8 -----
 ©
 
 Annex | i
@@ -481,7 +481,7 @@ Criteria 4:
 (a) Evidence for outstanding academic and research recognition at institutional/national /international levels
 
 
------ Page 9 -----
+----- circular1.pdf: Page 9 -----
 (ii)
 
 (iii)
