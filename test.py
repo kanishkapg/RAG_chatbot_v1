@@ -11,7 +11,6 @@ from typing import List, Dict, Optional
 load_dotenv('.env', override=True)
 
 class DocumentProcessor:
-    """Handles document loading and processing"""
     
     def __init__(self, file_path: str, chunk_size: int = 1000, chunk_overlap: int = 200):
         self.file_path = file_path
@@ -19,7 +18,6 @@ class DocumentProcessor:
         self.chunk_overlap = chunk_overlap
     
     def load_and_split_documents(self) -> List[Dict]:
-        """Load and split documents into chunks"""
         loader = TextLoader(self.file_path)
         documents = loader.load()
         
@@ -35,7 +33,6 @@ class DocumentProcessor:
 
 
 class VectorDatabaseManager:
-    """Manages interactions with Qdrant vector database"""
     
     def __init__(self, collection_name: str = "rag_qna", vector_size: int = 1024):
         self.client = QdrantClient(
@@ -47,7 +44,6 @@ class VectorDatabaseManager:
         self.embedding_model = SentenceTransformer("BAAI/bge-m3")
     
     def initialize_collection(self) -> None:
-        """Initialize or reset the collection"""
         if self.client.collection_exists(self.collection_name):
             self.client.delete_collection(self.collection_name)
             
@@ -57,7 +53,6 @@ class VectorDatabaseManager:
         )
     
     def upsert_documents(self, documents: List[Dict], source: str = "unknown") -> None:
-        """Insert or update documents in the vector database"""
         points = []
         for i, doc in enumerate(documents):
             embedding = self.embedding_model.encode(doc["page_content"])
@@ -75,7 +70,6 @@ class VectorDatabaseManager:
         )
     
     def search_similar_documents(self, query: str, limit: int = 3) -> List[Dict]:
-        """Search for similar documents based on query"""
         query_embedding = self.embedding_model.encode(query).tolist()
         
         hits = self.client.query_points(
@@ -98,17 +92,15 @@ class VectorDatabaseManager:
 
 
 class LLMResponseGenerator:
-    """Handles generation of responses using Groq's LLM"""
     
     def __init__(self, model_name: str = "llama-3.1-8b-instant"):
-        self.client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+        self.groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
         self.model_name = model_name
     
     def generate_response(self, query: str, context: str, sources: List[str]) -> Dict:
-        """Generate a response based on query and context"""
         prompt = self._build_prompt(query, context, sources)
         
-        response = self.client.chat.completions.create(
+        response = self.groq_client.chat.completions.create(
             messages=[{"role": "user", "content": prompt}],
             model=self.model_name,
             max_tokens=512,
@@ -131,7 +123,6 @@ class LLMResponseGenerator:
 
 
 class RAGSystem:
-    """Main RAG system orchestrator"""
     
     def __init__(self, document_path: str):
         self.document_path = document_path
@@ -140,21 +131,16 @@ class RAGSystem:
         self.llm = LLMResponseGenerator()
     
     def initialize_system(self) -> None:
-        """Initialize the RAG system with documents"""
         documents = self.document_processor.load_and_split_documents()
         self.vector_db.initialize_collection()
         self.vector_db.upsert_documents(documents, source=self.document_path)
     
     def query(self, question: str) -> Dict:
-        """Process a query through the RAG system"""
-        # Retrieve relevant documents
         hits = self.vector_db.search_similar_documents(question)
         
-        # Prepare context and sources
         context = " ".join([hit["text"] for hit in hits])
-        sources = list(set([hit["source"] for hit in hits]))  # Remove duplicates
+        sources = list(set([hit["source"] for hit in hits]))
         
-        # Generate response
         response = self.llm.generate_response(question, context, sources)
         
         return {
@@ -165,21 +151,17 @@ class RAGSystem:
         }
 
 
-# Example usage (this would be replaced by Streamlit UI integration)
 if __name__ == "__main__":
-    # Initialize the RAG system
     rag_system = RAGSystem("output_tesseract.txt")
     rag_system.initialize_system()
     
-    # Example query
     query = "In which languages should the notice calling for applications be published?"
     result = rag_system.query(query)
     
-    # Print results
     print(f"Question: {result['question']}")
     print(f"Answer: {result['answer']}")
     print(f"Sources: {', '.join(result['sources'])}")
     print("\nRelevant documents:")
     for doc in result["relevant_documents"]:
         print(f"\nID: {doc['id']}, Score: {doc['score']}")
-        print(f"Text: {doc['text'][:200]}...")  # Print first 200 chars
+        print(f"Text: {doc['text'][:200]}...")
