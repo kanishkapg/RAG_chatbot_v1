@@ -22,29 +22,6 @@ class DocumentProcessor:
         self.groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
         self.model_name = "llama-3.1-8b-instant"
     
-    def _preprocess_text_for_metadata(self, text: str) -> str:
-        """Preprocess text to focus on the header/metadata section."""
-        # Take first 2000 characters which usually contain the metadata
-        header_text = text[:2000]
-        
-        # Look for common patterns in circulars
-        lines = header_text.split('\n')
-        relevant_lines = []
-        
-        for line in lines:
-            line = line.strip()
-            if any(keyword in line.lower() for keyword in [
-                'circular', 'number', 'date', 'subject', 'title', 'issued', 
-                'effective', 'supersede', 'repeal', 'cancel', 'department'
-            ]):
-                relevant_lines.append(line)
-        
-        # If we found relevant lines, use them; otherwise use the header
-        if relevant_lines:
-            return '\n'.join(relevant_lines)
-        else:
-            return header_text
-    
     def _extract_metadata_with_regex(self, text: str) -> Dict:
         metadata = {
             "circular_number": None,
@@ -90,14 +67,13 @@ class DocumentProcessor:
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
                 title = match.group(1).strip()
-                if len(title) > 10:  # Ensure it's a meaningful title
+                if len(title) > 10:
                     metadata["title"] = title
                 break
         
         return metadata
     
     def _extract_metadata(self, text: str) -> Dict:
-        processed_text = self._preprocess_text_for_metadata(text)
         
         prompt = f"""
         You are an expert at extracting metadata from official documents and circulars. 
@@ -106,7 +82,7 @@ class DocumentProcessor:
         1. Document/circular numbers (often after "Circular No:", "Reference:", "No:", etc.)
         2. Titles or subjects (often after "Subject:", "Re:", "Title:", etc.)  
         3. Dates (issued date, effective date, etc.)
-        4. Any references to superseded/repealed documents
+        4. Any references to superseded/repealed/cancelled documents
         5. Department or issuing authority information
         
         Return ONLY a valid JSON object with these exact fields:
@@ -120,7 +96,7 @@ class DocumentProcessor:
         }}
         
         Document text:
-        {processed_text}
+        {text}
         
         JSON Response:"""
         
