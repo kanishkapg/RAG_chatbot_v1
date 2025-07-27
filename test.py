@@ -22,58 +22,8 @@ class DocumentProcessor:
         self.groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
         self.model_name = "llama-3.1-8b-instant"
     
-    def _extract_metadata_with_regex(self, text: str) -> Dict:
-        metadata = {
-            "circular_number": None,
-            "title": None,
-            "issued_date": None,
-            "effective_date": None,
-            "repealed_circulars": [],
-            "other": {}
-        }
-        
-        circular_patterns = [
-            r'circular\s+no\.?\s*:?\s*([A-Z0-9/-]+)',
-            r'circular\s+number\s*:?\s*([A-Z0-9/-]+)',
-            r'cir\.\s*no\.?\s*:?\s*([A-Z0-9/-]+)',
-            r'reference\s*:?\s*([A-Z0-9/-]+)',
-        ]
-        
-        for pattern in circular_patterns:
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                metadata["circular_number"] = match.group(1).strip()
-                break
-        
-        date_patterns = [
-            r'date\s*:?\s*(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})',
-            r'issued\s*:?\s*(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})',
-            r'(\d{1,2}\s+\w+\s+\d{4})',
-        ]
-        
-        for pattern in date_patterns:
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                metadata["issued_date"] = match.group(1).strip()
-                break
-        
-        title_patterns = [
-            r'subject\s*:?\s*([^\n]+)',
-            r'title\s*:?\s*([^\n]+)',
-            r're\s*:?\s*([^\n]+)',
-        ]
-        
-        for pattern in title_patterns:
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                title = match.group(1).strip()
-                if len(title) > 10:
-                    metadata["title"] = title
-                break
-        
-        return metadata
-    
     def _extract_metadata(self, text: str) -> Dict:
+        """Extract metadata using LLM only - no regex fallback."""
         
         prompt = f"""
         You are an expert at extracting metadata from official documents and circulars. 
@@ -102,9 +52,12 @@ class DocumentProcessor:
         
         try:
             response = self.groq_client.chat.completions.create(
-                messages=[{"role": "user", "content": prompt}],
+                messages=[
+                    {"role": "system", "content": "You are a precise metadata extractor. Respond only with valid JSON."},
+                    {"role": "user", "content": prompt}
+                ],
                 model=self.model_name,
-                max_tokens=512,
+                max_tokens=800,
                 temperature=0.1
             )
             
@@ -119,16 +72,30 @@ class DocumentProcessor:
                 metadata = json.loads(json_str)
                 
                 if isinstance(metadata, dict):
-                    return self._validate_metadata(metadata)
+                    validated_metadata = self._validate_metadata(metadata)
+                    print(f"Successfully extracted metadata: {validated_metadata}")
+                    return validated_metadata
             
-            print("LLM extraction failed, falling back to regex...")
+            print("Failed to parse JSON from LLM response, returning default metadata")
+            return self._get_default_metadata()
             
+        except json.JSONDecodeError as e:
+            print(f"JSON parsing error: {e}, returning default metadata")
+            return self._get_default_metadata()
         except Exception as e:
-            print(f"Error with LLM extraction: {e}")
-        
-        regex_metadata = self._extract_metadata_with_regex(text)
-        print(f"Regex extracted metadata: {regex_metadata}")
-        return regex_metadata
+            print(f"Error with LLM extraction: {e}, returning default metadata")
+            return self._get_default_metadata()
+    
+    def _get_default_metadata(self) -> Dict:
+        """Return default metadata when extraction fails completely."""
+        return {
+            "circular_number": None,
+            "title": None,
+            "issued_date": None,
+            "effective_date": None,
+            "repealed_circulars": [],
+            "other": {}
+        }
     
     def _validate_metadata(self, metadata: Dict) -> Dict:
         default_metadata = {
@@ -183,7 +150,6 @@ class DocumentProcessor:
             })
         
         return chunked_docs
-
 class VectorDatabaseManager:
     
     def __init__(self, collection_name: str = "rag_qna", vector_size: int = 1024):
@@ -335,7 +301,7 @@ if __name__ == "__main__":
     rag_system = RAGSystem("output_tesseract.txt")
     rag_system.initialize_system()
     
-    query = "What are the citizenship and age requirements for applicants to the post of Director?"
+    query = "How should applications and documents be submitted according to the new procedure?"
     result = rag_system.query(query)
     
     print(f"\nQuestion: {result['question']}")
