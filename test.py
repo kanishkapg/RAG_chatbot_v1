@@ -15,20 +15,20 @@ load_dotenv('.env', override=True)
 
 class DocumentProcessor:
     
-    def __init__(self, file_path: str, chunk_size: int = 1000, chunk_overlap: int = 200):
-        self.file_path = file_path
+    def __init__(self, text_dir: str = "extracted_texts", chunk_size: int = 1000, chunk_overlap: int = 200):
+        self.text_dir = text_dir
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
         self.groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
         self.model_name = "llama-3.1-8b-instant"
     
-    def _extract_metadata(self, text: str) -> Dict:
+    def _extract_metadata(self, text: str, source_file: str) -> Dict:
         """Extract metadata using LLM only - no regex fallback."""
         
         prompt = f"""
         You are an expert at extracting metadata from official documents and circulars. 
         
-        Analyze the following text and extract metadata in VALID JSON format. Look carefully for:
+        Analyze the following text from {source_file}and extract metadata in VALID JSON format. Look carefully for:
         1. Document/circular numbers (often after "Circular No:", "Reference:", "No:", etc.)
         2. Titles or subjects (often after "Subject:", "Re:", "Title:", etc.)  
         3. Dates (issued date, effective date, etc.)
@@ -42,7 +42,8 @@ class DocumentProcessor:
             "issued_date": "string or null",
             "effective_date": "string or null",
             "repealed_circulars": ["array of strings"],
-            "other": {{"key": "value"}}
+            "other": {{"key": "value"}},
+            "source_file": "string"
         }}
         
         Document text:
@@ -62,7 +63,7 @@ class DocumentProcessor:
             )
             
             metadata_str = response.choices[0].message.content.strip()
-            print(f"LLM Response: {metadata_str}")
+            print(f"LLM Response for {source_file}: {metadata_str}")
             
             json_start = metadata_str.find('{')
             json_end = metadata_str.rfind('}') + 1
@@ -73,20 +74,20 @@ class DocumentProcessor:
                 
                 if isinstance(metadata, dict):
                     validated_metadata = self._validate_metadata(metadata)
-                    print(f"Successfully extracted metadata: {validated_metadata}")
+                    print(f"Successfully extracted metadata for {source_file}: {validated_metadata}")
                     return validated_metadata
             
-            print("Failed to parse JSON from LLM response, returning default metadata")
-            return self._get_default_metadata()
+            print(f"Failed to parse JSON for {source_file}, returning default metadata")
+            return self._get_default_metadata(source_file)
             
         except json.JSONDecodeError as e:
-            print(f"JSON parsing error: {e}, returning default metadata")
-            return self._get_default_metadata()
+            print(f"JSON parsing error for {source_file}: {e}, returning default metadata")
+            return self._get_default_metadata(source_file)
         except Exception as e:
-            print(f"Error with LLM extraction: {e}, returning default metadata")
-            return self._get_default_metadata()
+            print(f"Error with LLM extraction for {source_file}: {e}, returning default metadata")
+            return self._get_default_metadata(source_file)
     
-    def _get_default_metadata(self) -> Dict:
+    def _get_default_metadata(self, source_file: str) -> Dict:
         """Return default metadata when extraction fails completely."""
         return {
             "circular_number": None,
@@ -94,18 +95,12 @@ class DocumentProcessor:
             "issued_date": None,
             "effective_date": None,
             "repealed_circulars": [],
-            "other": {}
+            "other": {},
+            "source_file": source_file
         }
     
     def _validate_metadata(self, metadata: Dict) -> Dict:
-        default_metadata = {
-            "circular_number": None,
-            "title": None,
-            "issued_date": None,
-            "effective_date": None,
-            "repealed_circulars": [],
-            "other": {}
-        }
+        default_metadata = self._get_default_metadata(metadata.get("source_file", "unknown"))
         
         for key in default_metadata:
             if key not in metadata:
@@ -120,36 +115,46 @@ class DocumentProcessor:
         return metadata
     
     def load_and_split_documents(self) -> List[Dict]:
-        loader = TextLoader(self.file_path)
-        documents = loader.load()
-        
-        full_text = documents[0].page_content
-        
-        metadata = self._extract_metadata(full_text)
-        print(f"Extracted metadata: {metadata}")
-        
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=self.chunk_size,
-            chunk_overlap=self.chunk_overlap,
-            length_function=len,
-            separators=["\n\n", "\n", " ", ""]
-        )
-        
-        docs = text_splitter.split_documents(documents)
         
         chunked_docs = []
-        for i, doc in enumerate(docs):
-            chunked_docs.append({
-                "page_content": doc.page_content,
-                "metadata": {
-                    **doc.metadata,
-                    **metadata,
-                    "chunk_id": i + 1,
-                    "total_chunks": len(docs)
-                }
-            })
         
+        if not os.path.exists(self.text_dir):
+            raise FileNotFoundError(f"Text directory {self.text_dir} does not exist.")
+        
+        text_files = [f for f in os.listdir(self.text_dir) if f.endswith('.txt')]
+        
+        for text_file in text_files:
+            self.text_file_path = os.path.join(self.text_dir, text_file)
+            loader = TextLoader(self.text_file_path)
+            documents = loader.load()
+            
+            full_text = documents[0].page_content
+            metadata = self._extract_metadata(full_text, text_file)
+            
+            text_splitter = RecursiveCharacterTextSplitter(
+                chunk_size=self.chunk_size,
+                chunk_overlap=self.chunk_overlap,
+                length_function=len,
+                separators=["\n\n", "\n", " ", ""]
+            )
+        
+            docs = text_splitter.split_documents(documents)
+        
+            for i, doc in enumerate(docs):
+                chunked_docs.append({
+                    "page_content": doc.page_content,
+                    "metadata": {
+                        **doc.metadata,
+                        **metadata,
+                        "chunk_id": i + 1,
+                        "total_chunks": len(docs)
+                    }
+                })
+            
+
         return chunked_docs
+    
+    
 class VectorDatabaseManager:
     
     def __init__(self, collection_name: str = "rag_qna", vector_size: int = 1024):
