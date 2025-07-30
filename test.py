@@ -10,6 +10,7 @@ from typing import List, Dict, Optional
 import json
 import httpx
 import re
+from test_tesseract import process_all_pdfs
 
 load_dotenv('.env', override=True)
 
@@ -159,7 +160,7 @@ class VectorDatabaseManager:
     
     def __init__(self, collection_name: str = "rag_qna", vector_size: int = 1024):
         http_client = httpx.Client(
-            timeout=httpx.Timeout(30.0, connect=10.0, read=10.0, write=10.0)
+            timeout=httpx.Timeout(1140.0, connect=300.0, read=420.0, write=420.0)
         )
         self.client = QdrantClient(
             url=os.getenv("QDRANT_URL"),
@@ -178,13 +179,13 @@ class VectorDatabaseManager:
             vectors_config=VectorParams(size=self.vector_size, distance=Distance.COSINE)
         )
     
-    def upsert_documents(self, documents: List[Dict], source: str = "unknown") -> None:
+    def upsert_documents(self, documents: List[Dict]) -> None:
         points = []
         for i, doc in enumerate(documents):
             embedding = self.embedding_model.encode(doc["page_content"])
             payload = {
                 "text": doc["page_content"],
-                "source": source,
+                "source": doc["metadata"]["source_file"],
                 **doc["metadata"]
             }
             points.append(
@@ -201,16 +202,38 @@ class VectorDatabaseManager:
         )
         print(f"Upserted {len(points)} document chunks to Qdrant")
     
-    def search_similar_documents(self, query: str, limit: int = 3) -> List[Dict]:
+    def search_similar_documents(self, query: str, limit: int = 3, prefer_effective: bool = True) -> List[Dict]:
         query_embedding = self.embedding_model.encode(query).tolist()
         
         hits = self.client.query_points(
             collection_name=self.collection_name,
             query=query_embedding,
-            limit=limit,
+            limit=limit*2,
             with_payload=True,
             with_vectors=False
         ).points
+        
+        # Filter and prioritize effective circulars
+        filtered_hits = []
+        repealed_circulars = set()
+        for hit in hits:
+            if hit.payload.get("repealed_circulars"):
+                repealed_circulars.update(hit.payload["repealed_circulars"])
+        
+        for hit in hits:
+            circular_number = hit.payload.get("circular_number")
+            if prefer_effective and circular_number in repealed_circulars:
+                continue  # Skip repealed circulars
+            filtered_hits.append(hit)
+        
+        # Sort by score and effective_date (newer first)
+        filtered_hits.sort(key=lambda x: (
+            x.score,
+            x.payload.get("effective_date", "") or ""
+        ), reverse=True)
+        
+        # Limit to requested number
+        filtered_hits = filtered_hits[:limit]
         
         return [
             {
@@ -218,9 +241,8 @@ class VectorDatabaseManager:
                 "score": hit.score,
                 "text": hit.payload["text"],
                 "source": hit.payload["source"],
-                "metadata": {k: v for k, v in hit.payload.items() if k not in ["text", "source"]}
-            }
-            for hit in hits
+                "metadata": {k: v for k, v in hit.payload.items() if k not in ["text", "source"]}            }
+            for hit in filtered_hits
         ]
 
 class LLMResponseGenerator:
@@ -248,15 +270,22 @@ class LLMResponseGenerator:
     def _build_prompt(self, query: str, context: str, sources: List[str], metadata_list: List[Dict]) -> str:
         metadata_info = ""
         for meta in metadata_list:
+            metadata_info += f"\nDocument from {meta['source_file']}:\n"
             if meta.get('circular_number'):
                 metadata_info += f"Circular Number: {meta['circular_number']}\n"
             if meta.get('title'):
                 metadata_info += f"Title: {meta['title']}\n"
             if meta.get('issued_date'):
                 metadata_info += f"Issued Date: {meta['issued_date']}\n"
-        
+            if meta.get('effective_date'):
+                metadata_info += f"Effective Date: {meta['effective_date']}\n"
+            if meta.get('repealed_circulars'):
+                metadata_info += f"Repealed Circulars: {', '.join(meta['repealed_circulars'])}\n"
+                
         return f"""
-        Answer the question based on the context provided below. Use the document metadata to provide accurate references.
+        Answer the question based on the context provided below. Prioritize information from documents that are effective 
+        (not listed in any 'repealed_circulars'). If multiple documents are relevant, prefer the one with the most recent effective_date. 
+        Cite the circular number, source file, and effective date in your response.
 
         Document Metadata:
         {metadata_info}
@@ -265,25 +294,29 @@ class LLMResponseGenerator:
         
         Question: {query}
         
-        Provide a concise answer and cite the sources with circular numbers and dates where available.
+        Provide a concise answer and include citations with circular numbers, source files, and effective dates where applicable.
         """
 
 class RAGSystem:
     
-    def __init__(self, document_path: str):
-        self.document_path = document_path
-        self.document_processor = DocumentProcessor(document_path)
+    def __init__(self, data_dir: str = "./data", text_dir: str = "extracted_texts"):
+        self.data_dir = data_dir
+        self.text_dir = text_dir
+        self.document_processor = DocumentProcessor(text_dir=self.text_dir)
         self.vector_db = VectorDatabaseManager()
         self.llm = LLMResponseGenerator()
     
     def initialize_system(self) -> None:
         print("Processing documents and extracting metadata...")
+        extracted_texts = process_all_pdfs(self.data_dir, self.text_dir)
+        
+        print("Processing documents and extracting metadata...")
         documents = self.document_processor.load_and_split_documents()
-        print(f"Split document into {len(documents)} chunks")
+        print(f"Split documents into {len(documents)} chunks")
         
         print("Initializing vector database...")
         self.vector_db.initialize_collection()
-        self.vector_db.upsert_documents(documents, source=self.document_path)
+        self.vector_db.upsert_documents(documents)
         print("RAG system initialization complete!")
     
     def query(self, question: str) -> Dict:
@@ -303,7 +336,7 @@ class RAGSystem:
         }
 
 if __name__ == "__main__":
-    rag_system = RAGSystem("output_tesseract.txt")
+    rag_system = RAGSystem(data_dir="./data", text_dir="extracted_texts")
     rag_system.initialize_system()
     
     query = "How should applications and documents be submitted according to the new procedure?"
