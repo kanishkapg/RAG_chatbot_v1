@@ -1,9 +1,7 @@
 import pytesseract
 from pdf2image import convert_from_path
 import os
-from dotenv import load_dotenv
-
-load_dotenv('.env', override=True)
+from config import DATA_DIR
 
 def extract_text_from_pdf(pdf_path, output_dir="extracted_texts"):
     # Ensure output directory exists
@@ -28,7 +26,7 @@ def extract_text_from_pdf(pdf_path, output_dir="extracted_texts"):
     print(f"Text extracted to {output_txt_path}")
     return full_text, output_txt_path
 
-def process_all_pdfs(data_dir=os.getenv("DATA_DIR"), output_dir="extracted_texts"):
+def process_all_pdfs(data_dir=DATA_DIR, output_dir="extracted_texts"):
     # Ensure data directory exists
     if not os.path.exists(data_dir):
         raise FileNotFoundError(f"Directory {data_dir} does not exist")

@@ -11,6 +11,7 @@ import json
 import httpx
 import re
 from test_tesseract import process_all_pdfs
+from config import DATA_DIR
 
 load_dotenv('.env', override=True)
 
@@ -299,7 +300,7 @@ class LLMResponseGenerator:
 
 class RAGSystem:
 
-    def __init__(self, data_dir: str = os.getenv("DATA_DIR"), text_dir: str = "extracted_texts"):
+    def __init__(self, data_dir: str = DATA_DIR, text_dir: str = "extracted_texts"):
         self.data_dir = data_dir
         self.text_dir = text_dir
         self.document_processor = DocumentProcessor(text_dir=self.text_dir)
@@ -336,7 +337,7 @@ class RAGSystem:
         }
 
 if __name__ == "__main__":
-    rag_system = RAGSystem(data_dir=os.getenv("DATA_DIR"), text_dir="extracted_texts")
+    rag_system = RAGSystem(data_dir=DATA_DIR, text_dir="extracted_texts")
     rag_system.initialize_system()
     
     query = "How should applications and documents be submitted according to the new procedure?"
