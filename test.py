@@ -6,35 +6,47 @@ from qdrant_client.models import Distance, VectorParams, PointStruct
 from groq import Groq
 import os
 from dotenv import load_dotenv
-from typing import List, Dict, Optional
+import psycopg2
+from psycopg2.extras import Json
 import json
 import httpx
-import re
 from test_tesseract import process_all_pdfs
-from config import DATA_DIR
+from config import DATA_DIR, POSTGRES_CONFIG
+import logging
+from typing import List, Dict, Optional
+
+# Setup logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 load_dotenv('.env', override=True)
 
+def get_db_connection():
+    """Establish PostgreSQL connection."""
+    try:
+        conn = psycopg2.connect(**POSTGRES_CONFIG)
+        return conn
+    except Exception as e:
+        logger.error(f"Failed to connect to PostgreSQL: {e}")
+        raise
+
 class DocumentProcessor:
-    
-    def __init__(self, text_dir: str = "extracted_texts", chunk_size: int = 1000, chunk_overlap: int = 200):
-        self.text_dir = text_dir
+    def __init__(self, chunk_size: int = 1000, chunk_overlap: int = 200):
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
         self.groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
         self.model_name = "llama-3.1-8b-instant"
-    
+
     def _extract_metadata(self, text: str, source_file: str) -> Dict:
-        """Extract metadata using LLM only - no regex fallback."""
-        
+        """Extract metadata using LLM and store in PostgreSQL."""
         prompt = f"""
         You are an expert at extracting metadata from official documents and circulars. 
         
-        Analyze the following text from {source_file}and extract metadata in VALID JSON format. Look carefully for:
+        Analyze the following text from {source_file} and extract metadata in VALID JSON format. Look carefully for:
         1. Document/circular numbers (often after "Circular No:", "Reference:", "No:", etc.)
         2. Titles or subjects (often after "Subject:", "Re:", "Title:", etc.)  
         3. Dates (issued date, effective date, etc.)
-        4. Any references to superseded/repealed/cancelled documents
+        4. Any references to superseded/repealed/canceled documents
         5. Department or issuing authority information
         
         Return ONLY a valid JSON object with these exact fields:
@@ -65,7 +77,7 @@ class DocumentProcessor:
             )
             
             metadata_str = response.choices[0].message.content.strip()
-            print(f"LLM Response for {source_file}: {metadata_str}")
+            logger.info(f"LLM Response for {source_file}: {metadata_str}")
             
             json_start = metadata_str.find('{')
             json_end = metadata_str.rfind('}') + 1
@@ -76,21 +88,50 @@ class DocumentProcessor:
                 
                 if isinstance(metadata, dict):
                     validated_metadata = self._validate_metadata(metadata)
-                    print(f"Successfully extracted metadata for {source_file}: {validated_metadata}")
+                    # Store metadata in PostgreSQL
+                    self._store_metadata(validated_metadata)
+                    logger.info(f"Successfully extracted and stored metadata for {source_file}: {validated_metadata}")
                     return validated_metadata
             
-            print(f"Failed to parse JSON for {source_file}, returning default metadata")
-            return self._get_default_metadata(source_file)
+            logger.warning(f"Failed to parse JSON for {source_file}, returning default metadata")
+            default_metadata = self._get_default_metadata(source_file)
+            self._store_metadata(default_metadata)
+            return default_metadata
             
         except json.JSONDecodeError as e:
-            print(f"JSON parsing error for {source_file}: {e}, returning default metadata")
-            return self._get_default_metadata(source_file)
+            logger.error(f"JSON parsing error for {source_file}: {e}, returning default metadata")
+            default_metadata = self._get_default_metadata(source_file)
+            self._store_metadata(default_metadata)
+            return default_metadata
         except Exception as e:
-            print(f"Error with LLM extraction for {source_file}: {e}, returning default metadata")
-            return self._get_default_metadata(source_file)
-    
+            logger.error(f"Error with LLM extraction for {source_file}: {e}, returning default metadata")
+            default_metadata = self._get_default_metadata(source_file)
+            self._store_metadata(default_metadata)
+            return default_metadata
+
+    def _store_metadata(self, metadata: Dict) -> None:
+        """Store metadata in PostgreSQL."""
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO document_metadata (filename, metadata, extraction_date)
+                    VALUES (%s, %s, CURRENT_TIMESTAMP)
+                    ON CONFLICT (filename) DO UPDATE
+                    SET metadata = %s, extraction_date = CURRENT_TIMESTAMP
+                    """,
+                    (metadata["source_file"], Json(metadata), Json(metadata))
+                )
+            conn.commit()
+            logger.info(f"Stored metadata for {metadata['source_file']} in PostgreSQL")
+        except Exception as e:
+            logger.error(f"Failed to store metadata for {metadata['source_file']}: {e}")
+        finally:
+            conn.close()
+
     def _get_default_metadata(self, source_file: str) -> Dict:
-        """Return default metadata when extraction fails completely."""
+        """Return default metadata when extraction fails."""
         return {
             "circular_number": None,
             "title": None,
@@ -100,7 +141,7 @@ class DocumentProcessor:
             "other": {},
             "source_file": source_file
         }
-    
+
     def _validate_metadata(self, metadata: Dict) -> Dict:
         default_metadata = self._get_default_metadata(metadata.get("source_file", "unknown"))
         
@@ -115,50 +156,60 @@ class DocumentProcessor:
                 metadata[key] = []
         
         return metadata
-    
+
     def load_and_split_documents(self) -> List[Dict]:
-        
+        """Load documents from PostgreSQL and split into chunks."""
         chunked_docs = []
         
-        if not os.path.exists(self.text_dir):
-            raise FileNotFoundError(f"Text directory {self.text_dir} does not exist.")
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT pdf_files.filename, extracted_text, document_metadata.metadata 
+                    FROM pdf_files 
+                    LEFT JOIN document_metadata 
+                    ON pdf_files.filename = document_metadata.filename
+                    """
+                )
+                rows = cur.fetchall()
+                
+                for filename, extracted_text, metadata in rows:
+                    if not extracted_text:
+                        logger.warning(f"No extracted text for {filename}, skipping")
+                        continue
+                        
+                    # If no metadata exists, extract it
+                    if not metadata:
+                        metadata = self._extract_metadata(extracted_text, filename)
+                    
+                    text_splitter = RecursiveCharacterTextSplitter(
+                        chunk_size=self.chunk_size,
+                        chunk_overlap=self.chunk_overlap,
+                        length_function=len,
+                        separators=["\n\n", "\n", " ", ""]
+                    )
+                    
+                    # Create a mock document for splitting
+                    from langchain.docstore.document import Document
+                    doc = Document(page_content=extracted_text, metadata={"source_file": filename})
+                    docs = text_splitter.split_documents([doc])
+                    
+                    for i, doc_chunk in enumerate(docs):
+                        chunked_docs.append({
+                            "page_content": doc_chunk.page_content,
+                            "metadata": {
+                                **metadata,
+                                "chunk_id": i + 1,
+                                "total_chunks": len(docs)
+                            }
+                        })
+        finally:
+            conn.close()
         
-        text_files = [f for f in os.listdir(self.text_dir) if f.endswith('.txt')]
-        
-        for text_file in text_files:
-            self.text_file_path = os.path.join(self.text_dir, text_file)
-            loader = TextLoader(self.text_file_path)
-            documents = loader.load()
-            
-            full_text = documents[0].page_content
-            metadata = self._extract_metadata(full_text, text_file)
-            
-            text_splitter = RecursiveCharacterTextSplitter(
-                chunk_size=self.chunk_size,
-                chunk_overlap=self.chunk_overlap,
-                length_function=len,
-                separators=["\n\n", "\n", " ", ""]
-            )
-        
-            docs = text_splitter.split_documents(documents)
-        
-            for i, doc in enumerate(docs):
-                chunked_docs.append({
-                    "page_content": doc.page_content,
-                    "metadata": {
-                        **doc.metadata,
-                        **metadata,
-                        "chunk_id": i + 1,
-                        "total_chunks": len(docs)
-                    }
-                })
-            
-
         return chunked_docs
-    
-    
+
 class VectorDatabaseManager:
-    
     def __init__(self, collection_name: str = "rag_qna", vector_size: int = 1024):
         http_client = httpx.Client(
             timeout=httpx.Timeout(1140.0, connect=300.0, read=420.0, write=420.0)
@@ -170,7 +221,7 @@ class VectorDatabaseManager:
         self.collection_name = collection_name
         self.vector_size = vector_size
         self.embedding_model = SentenceTransformer("BAAI/bge-m3")
-    
+
     def initialize_collection(self) -> None:
         if self.client.collection_exists(self.collection_name):
             self.client.delete_collection(self.collection_name)
@@ -179,95 +230,111 @@ class VectorDatabaseManager:
             collection_name=self.collection_name,
             vectors_config=VectorParams(size=self.vector_size, distance=Distance.COSINE)
         )
-    
+        logger.info(f"Initialized Qdrant collection {self.collection_name}")
+
     def upsert_documents(self, documents: List[Dict]) -> None:
         points = []
         for i, doc in enumerate(documents):
-            embedding = self.embedding_model.encode(doc["page_content"])
-            payload = {
-                "text": doc["page_content"],
-                "source": doc["metadata"]["source_file"],
-                **doc["metadata"]
-            }
-            points.append(
-                PointStruct(
-                    id=i + 1,
-                    vector=embedding.tolist(),
-                    payload=payload
+            try:
+                embedding = self.embedding_model.encode(doc["page_content"])
+                payload = {
+                    "text": doc["page_content"],
+                    "source": doc["metadata"]["source_file"],
+                    **doc["metadata"]
+                }
+                points.append(
+                    PointStruct(
+                        id=i + 1,
+                        vector=embedding.tolist(),
+                        payload=payload
+                    )
                 )
+            except Exception as e:
+                logger.error(f"Failed to encode document chunk {i+1} for {doc['metadata']['source_file']}: {e}")
+        
+        if points:
+            self.client.upsert(
+                collection_name=self.collection_name,
+                points=points
             )
-        
-        self.client.upsert(
-            collection_name=self.collection_name,
-            points=points
-        )
-        print(f"Upserted {len(points)} document chunks to Qdrant")
-    
+            logger.info(f"Upserted {len(points)} document chunks to Qdrant")
+
     def search_similar_documents(self, query: str, limit: int = 3, prefer_effective: bool = True) -> List[Dict]:
-        query_embedding = self.embedding_model.encode(query).tolist()
-        
-        hits = self.client.query_points(
-            collection_name=self.collection_name,
-            query=query_embedding,
-            limit=limit*2,
-            with_payload=True,
-            with_vectors=False
-        ).points
-        
-        # Filter and prioritize effective circulars
-        filtered_hits = []
-        repealed_circulars = set()
-        for hit in hits:
-            if hit.payload.get("repealed_circulars"):
-                repealed_circulars.update(hit.payload["repealed_circulars"])
-        
-        for hit in hits:
-            circular_number = hit.payload.get("circular_number")
-            if prefer_effective and circular_number in repealed_circulars:
-                continue  # Skip repealed circulars
-            filtered_hits.append(hit)
-        
-        # Sort by score and effective_date (newer first)
-        filtered_hits.sort(key=lambda x: (
-            x.score,
-            x.payload.get("effective_date", "") or ""
-        ), reverse=True)
-        
-        # Limit to requested number
-        filtered_hits = filtered_hits[:limit]
-        
-        return [
-            {
-                "id": hit.id,
-                "score": hit.score,
-                "text": hit.payload["text"],
-                "source": hit.payload["source"],
-                "metadata": {k: v for k, v in hit.payload.items() if k not in ["text", "source"]}            }
-            for hit in filtered_hits
-        ]
+        try:
+            query_embedding = self.embedding_model.encode(query).tolist()
+            
+            hits = self.client.query_points(
+                collection_name=self.collection_name,
+                query=query_embedding,
+                limit=limit*2,
+                with_payload=True,
+                with_vectors=False
+            ).points
+            
+            # Filter and prioritize effective circulars
+            filtered_hits = []
+            repealed_circulars = set()
+            for hit in hits:
+                if hit.payload.get("repealed_circulars"):
+                    repealed_circulars.update(hit.payload["repealed_circulars"])
+            
+            for hit in hits:
+                circular_number = hit.payload.get("circular_number")
+                if prefer_effective and circular_number in repealed_circulars:
+                    continue
+                filtered_hits.append(hit)
+            
+            # Sort by score and effective_date (newer first)
+            filtered_hits.sort(key=lambda x: (
+                x.score,
+                x.payload.get("effective_date", "") or ""
+            ), reverse=True)
+            
+            filtered_hits = filtered_hits[:limit]
+            
+            return [
+                {
+                    "id": hit.id,
+                    "score": hit.score,
+                    "text": hit.payload["text"],
+                    "source": hit.payload["source"],
+                    "metadata": {k: v for k, v in hit.payload.items() if k not in ["text", "source"]}
+                }
+                for hit in filtered_hits
+            ]
+        except Exception as e:
+            logger.error(f"Failed to search similar documents: {e}")
+            return []
 
 class LLMResponseGenerator:
-    
     def __init__(self, model_name: str = "llama-3.1-8b-instant"):
         self.groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
         self.model_name = model_name
-    
+
     def generate_response(self, query: str, context: str, sources: List[str], metadata_list: List[Dict]) -> Dict:
-        prompt = self._build_prompt(query, context, sources, metadata_list)
-        
-        response = self.groq_client.chat.completions.create(
-            messages=[{"role": "user", "content": prompt}],
-            model=self.model_name,
-            max_tokens=512,
-            temperature=0.3
-        )
-        
-        return {
-            "answer": response.choices[0].message.content.strip(),
-            "sources": sources,
-            "metadata": metadata_list
-        }
-    
+        try:
+            prompt = self._build_prompt(query, context, sources, metadata_list)
+            
+            response = self.groq_client.chat.completions.create(
+                messages=[{"role": "user", "content": prompt}],
+                model=self.model_name,
+                max_tokens=512,
+                temperature=0.3
+            )
+            
+            return {
+                "answer": response.choices[0].message.content.strip(),
+                "sources": sources,
+                "metadata": metadata_list
+            }
+        except Exception as e:
+            logger.error(f"Failed to generate LLM response: {e}")
+            return {
+                "answer": "Error generating response",
+                "sources": sources,
+                "metadata": metadata_list
+            }
+
     def _build_prompt(self, query: str, context: str, sources: List[str], metadata_list: List[Dict]) -> str:
         metadata_info = ""
         for meta in metadata_list:
@@ -299,48 +366,82 @@ class LLMResponseGenerator:
         """
 
 class RAGSystem:
-
-    def __init__(self, data_dir: str = DATA_DIR, text_dir: str = "extracted_texts"):
+    def __init__(self, data_dir: str = DATA_DIR):
         self.data_dir = data_dir
-        self.text_dir = text_dir
-        self.document_processor = DocumentProcessor(text_dir=self.text_dir)
+        self.document_processor = DocumentProcessor()
         self.vector_db = VectorDatabaseManager()
         self.llm = LLMResponseGenerator()
-    
+
     def initialize_system(self) -> None:
-        print("Processing documents and extracting metadata...")
-        extracted_texts = process_all_pdfs(self.data_dir, self.text_dir)
+        logger.info("Processing PDFs and extracting text...")
+        extracted_texts = process_all_pdfs(self.data_dir)
         
-        print("Processing documents and extracting metadata...")
+        logger.info("Processing documents and extracting metadata...")
         documents = self.document_processor.load_and_split_documents()
-        print(f"Split documents into {len(documents)} chunks")
+        logger.info(f"Split documents into {len(documents)} chunks")
         
-        print("Initializing vector database...")
+        logger.info("Initializing vector database...")
         self.vector_db.initialize_collection()
         self.vector_db.upsert_documents(documents)
-        print("RAG system initialization complete!")
-    
+        logger.info("RAG system initialization complete!")
+
     def query(self, question: str) -> Dict:
-        hits = self.vector_db.search_similar_documents(question)
-        
-        context = " ".join([hit["text"] for hit in hits])
-        sources = list(set([hit["source"] for hit in hits]))
-        metadata_list = [hit["metadata"] for hit in hits]
-        
-        response = self.llm.generate_response(question, context, sources, metadata_list)
-        
-        return {
-            "question": question,
-            "answer": response["answer"],
-            "sources": response["sources"],
-            "relevant_documents": hits
-        }
+        try:
+            hits = self.vector_db.search_similar_documents(question)
+            
+            context = " ".join([hit["text"] for hit in hits])
+            sources = list(set([hit["source"] for hit in hits]))
+            metadata_list = [hit["metadata"] for hit in hits]
+            
+            response = self.llm.generate_response(question, context, sources, metadata_list)
+            
+            return {
+                "question": question,
+                "answer": response["answer"],
+                "sources": response["sources"],
+                "relevant_documents": hits
+            }
+        except Exception as e:
+            logger.error(f"Failed to process query: {e}")
+            return {
+                "question": question,
+                "answer": "Error processing query",
+                "sources": [],
+                "relevant_documents": []
+            }
 
 if __name__ == "__main__":
-    rag_system = RAGSystem(data_dir=DATA_DIR, text_dir="extracted_texts")
+    # Create PostgreSQL tables if they don't exist
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS pdf_files (
+                    filename VARCHAR(255) PRIMARY KEY,
+                    file_hash VARCHAR(64),
+                    extracted_text TEXT,
+                    extraction_date TIMESTAMP,
+                    UNIQUE (filename)
+                )
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS document_metadata (
+                    filename VARCHAR(255) PRIMARY KEY,
+                    metadata JSONB,
+                    extraction_date TIMESTAMP,
+                    FOREIGN KEY (filename) REFERENCES pdf_files(filename)
+                )
+            """)
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_file_hash ON pdf_files(file_hash)")
+        conn.commit()
+        logger.info("PostgreSQL tables created or verified")
+    finally:
+        conn.close()
+
+    rag_system = RAGSystem(data_dir=DATA_DIR)
     rag_system.initialize_system()
     
-    query = "How should applications and documents be submitted according to the new procedure?"
+    query = "What is the current leave policy at SLT?"
     result = rag_system.query(query)
     
     print(f"\nQuestion: {result['question']}")
