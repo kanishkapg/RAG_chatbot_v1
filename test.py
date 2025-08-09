@@ -222,17 +222,50 @@ class VectorDatabaseManager:
         self.vector_size = vector_size
         self.embedding_model = SentenceTransformer("BAAI/bge-m3")
 
-    def initialize_collection(self) -> None:
-        if self.client.collection_exists(self.collection_name):
-            self.client.delete_collection(self.collection_name)
-            
-        self.client.create_collection(
-            collection_name=self.collection_name,
-            vectors_config=VectorParams(size=self.vector_size, distance=Distance.COSINE)
-        )
-        logger.info(f"Initialized Qdrant collection {self.collection_name}")
+    def initialize_collection(self, force_recreate: bool = False) -> None:
+        """Initialize Qdrant collection only if it doesn't exist."""
+        if force_recreate or not self.client.collection_exists(self.collection_name):
+            if self.client.collection_exists(self.collection_name):
+                self.client.delete_collection(self.collection_name)
+            self.client.create_collection(
+                collection_name=self.collection_name,
+                vectors_config=VectorParams(size=self.vector_size, distance=Distance.COSINE)
+            )
+            logger.info(f"Initialized Qdrant collection {self.collection_name}")
+        else:
+            logger.info(f"Qdrant collection {self.collection_name} already exists, skipping creation")
 
+    def get_existing_documents(self) -> set:
+        """Get set of existing filenames in Qdrant."""
+        try:
+            if self.client.collection_exists(self.collection_name):
+                # Scroll through all points to get existing filenames
+                points = self.client.scroll(
+                    collection_name=self.collection_name,
+                    limit=1000,  # Adjust based on your data size
+                    with_payload=True,
+                    with_vectors=False
+                )
+                existing_filenames = {point.payload["source"] for point in points[0]}
+                return existing_filenames
+            return set()
+        except Exception as e:
+            logger.error(f"Failed to get existing documents from Qdrant: {e}")
+            return set()
+    
     def upsert_documents(self, documents: List[Dict]) -> None:
+        """Upsert only new or updated documents based on existing filenames."""
+        if not documents:
+            logger.info("No new documents to upsert")
+            return
+
+        existing_filenames = self.get_existing_documents()
+        new_documents = [doc for doc in documents if doc["metadata"]["source_file"] not in existing_filenames]
+
+        if not new_documents:
+            logger.info("No new or updated documents to upsert")
+            return
+        
         points = []
         for i, doc in enumerate(documents):
             try:
@@ -244,7 +277,7 @@ class VectorDatabaseManager:
                 }
                 points.append(
                     PointStruct(
-                        id=i + 1,
+                        id=i,
                         vector=embedding.tolist(),
                         payload=payload
                     )
@@ -441,7 +474,7 @@ if __name__ == "__main__":
     rag_system = RAGSystem(data_dir=DATA_DIR)
     rag_system.initialize_system()
     
-    query = "What is the current leave policy at SLT?"
+    query = "How many casual leaves are allowed for a month?"
     result = rag_system.query(query)
     
     print(f"\nQuestion: {result['question']}")
