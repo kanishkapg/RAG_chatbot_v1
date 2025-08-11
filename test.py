@@ -2,7 +2,7 @@ from sentence_transformers import SentenceTransformer
 from langchain_community.document_loaders import TextLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams, PointStruct
+from qdrant_client.models import Distance, VectorParams, PointStruct, FieldCondition, Filter, MatchValue
 from groq import Groq
 import os
 from dotenv import load_dotenv
@@ -13,7 +13,7 @@ import httpx
 from test_tesseract import process_all_pdfs
 from config import DATA_DIR, POSTGRES_CONFIG
 import logging
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Set
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -46,16 +46,21 @@ class DocumentProcessor:
         1. Document/circular numbers (often after "Circular No:", "Reference:", "No:", etc.)
         2. Titles or subjects (often after "Subject:", "Re:", "Title:", etc.)  
         3. Dates (issued date, effective date, etc.)
-        4. Any references to superseded/repealed/canceled documents
+        4. Any references to superseded/repealed/amended/canceled documents. Classify them based on the exact language:
+            Repealed: If the document explicitly repeals, revokes, withdraws, terminates, or cancels another.
+            Superseded: If the document supersedes, replaces, overrides, or overrules another.
+            Amended: If the document amends, modifies, revises, extends, or updates another.
         5. Department or issuing authority information
         
         Return ONLY a valid JSON object with these exact fields:
         {{
             "circular_number": "string or null",
-            "title": "string or null", 
+            "title": "string or null",
             "issued_date": "string or null",
             "effective_date": "string or null",
             "repealed_circulars": ["array of strings"],
+            "superseded_circulars": ["array of strings"],
+            "amended_circulars": ["array of strings"],
             "other": {{"key": "value"}},
             "source_file": "string"
         }}
@@ -138,6 +143,8 @@ class DocumentProcessor:
             "issued_date": None,
             "effective_date": None,
             "repealed_circulars": [],
+            "superseded_circulars": [],
+            "amended_circulars": [],
             "other": {},
             "source_file": source_file
         }
@@ -222,8 +229,30 @@ class VectorDatabaseManager:
         self.vector_size = vector_size
         self.embedding_model = SentenceTransformer("BAAI/bge-m3")
 
+    def _ensure_payload_indexes(self):
+        """Create needed payload indexes for filtering."""
+        # Each of these fields is used in filters / conditions
+        index_fields = [
+            "circular_number",
+            "repealed_circulars",
+            "superseded_circulars",
+            "amended_circulars"
+        ]
+        for field in index_fields:
+            try:
+                # 'keyword' works for single string or array of strings
+                self.client.create_payload_index(
+                    collection_name=self.collection_name,
+                    field_name=field,
+                    field_schema="keyword"
+                )
+                logger.info(f"Created/verified payload index on '{field}'")
+            except Exception as e:
+                # If it already exists or field absent yet, just log debug
+                logger.debug(f"Index create attempt for '{field}' result: {e}")
+
     def initialize_collection(self, force_recreate: bool = False) -> None:
-        """Initialize Qdrant collection only if it doesn't exist."""
+        """Initialize Qdrant collection only if it doesn't exist, then ensure indexes."""
         if force_recreate or not self.client.collection_exists(self.collection_name):
             if self.client.collection_exists(self.collection_name):
                 self.client.delete_collection(self.collection_name)
@@ -234,6 +263,8 @@ class VectorDatabaseManager:
             logger.info(f"Initialized Qdrant collection {self.collection_name}")
         else:
             logger.info(f"Qdrant collection {self.collection_name} already exists, skipping creation")
+        # Always ensure indexes (idempotent)
+        self._ensure_payload_indexes()
 
     def get_existing_documents(self) -> set:
         """Get set of existing filenames in Qdrant."""
@@ -254,7 +285,7 @@ class VectorDatabaseManager:
             return set()
     
     def upsert_documents(self, documents: List[Dict]) -> None:
-        """Upsert only new or updated documents based on existing filenames."""
+        """Upsert only new documents based on existing filenames."""
         if not documents:
             logger.info("No new documents to upsert")
             return
@@ -267,78 +298,185 @@ class VectorDatabaseManager:
             return
         
         points = []
-        for i, doc in enumerate(documents):
+        for i, doc in enumerate(new_documents):
             try:
+                # Normalize metadata fields to avoid None (use empty list or omit)
+                md = doc["metadata"].copy()
+                for list_field in ["repealed_circulars", "superseded_circulars", "amended_circulars"]:
+                    if md.get(list_field) is None:
+                        md[list_field] = []
+                if md.get("circular_number") is None:
+                    # Optionally remove if None to reduce noise
+                    md.pop("circular_number", None)
+
                 embedding = self.embedding_model.encode(doc["page_content"])
                 payload = {
                     "text": doc["page_content"],
-                    "source": doc["metadata"]["source_file"],
-                    **doc["metadata"]
+                    "source": md.get("source_file"),
+                    **md
                 }
+                # Stable point id
+                import hashlib
+                pid = int(hashlib.md5(f"{payload['source']}|{md.get('chunk_id')}".encode()).hexdigest()[:12], 16)
                 points.append(
                     PointStruct(
-                        id=i,
+                        id=pid,
                         vector=embedding.tolist(),
                         payload=payload
                     )
                 )
             except Exception as e:
-                logger.error(f"Failed to encode document chunk {i+1} for {doc['metadata']['source_file']}: {e}")
+                logger.error(f"Failed to encode document chunk for {doc['metadata'].get('source_file')}: {e}")
         
         if points:
             self.client.upsert(
                 collection_name=self.collection_name,
                 points=points
             )
-            logger.info(f"Upserted {len(points)} document chunks to Qdrant")
-
+            logger.info(f"Upserted {len(points)} new document chunks to Qdrant")
+            
+    def _get_all_successors(self, circular_nums: Set[str]) -> Set[str]:
+        """Recursively find all successor circulars (newer ones that repeal/supersede/amend the given ones)."""
+        all_related = set(circular_nums)
+        to_process = set(circular_nums)
+        
+        while to_process:
+            new_successors = set()
+            for circ in to_process:
+                if not circ:
+                    continue
+                filter = Filter(
+                    should=[
+                        FieldCondition(
+                            key="repealed_circulars",
+                            match=MatchValue(value=circ)
+                        ),
+                        FieldCondition(
+                            key="superseded_circulars",
+                            match=MatchValue(value=circ)
+                        ),
+                        FieldCondition(
+                            key="amended_circulars",
+                            match=MatchValue(value=circ)
+                        )
+                    ]
+                )
+                
+                try:
+                    scroll_result = self.client.scroll(
+                        collection_name=self.collection_name,
+                        scroll_filter=filter,
+                        limit=100,
+                        with_payload=True,
+                        with_vectors=False
+                    )
+                    for point in scroll_result[0]:
+                        successor_circ = point.payload.get("circular_number")
+                        if successor_circ and successor_circ not in all_related:
+                            new_successors.add(successor_circ)
+                except Exception as e:
+                    logger.error(f"Failed to scroll for successors of {circ}: {e}")
+        
+            all_related.update(new_successors)
+            to_process = new_successors
+        
+        return all_related
+                
+                    
     def search_similar_documents(self, query: str, limit: int = 3, prefer_effective: bool = True) -> List[Dict]:
         try:
             query_embedding = self.embedding_model.encode(query).tolist()
             
-            hits = self.client.query_points(
+            # Get initial search results
+            initial_hits = self.client.query_points(
                 collection_name=self.collection_name,
                 query=query_embedding,
-                limit=limit*2,
+                limit=20, 
                 with_payload=True,
                 with_vectors=False
             ).points
             
-            # Filter and prioritize effective circulars
-            filtered_hits = []
+            # Extract circular numbers from initial hits
+            circular_nums = {
+                hit.payload.get("circular_number") 
+                for hit in initial_hits 
+                if hit.payload.get("circular_number")
+            }
+            
+            if circular_nums:
+                # Find all related successors
+                all_related = self._get_all_successors(circular_nums)
+                
+                if all_related:
+                    # Filter for related documents
+                    related_filter = Filter(
+                        should=[
+                            FieldCondition(
+                                key="circular_number", 
+                                match=MatchValue(value=c)
+                            ) 
+                            for c in all_related if c
+                        ]
+                    )
+                    
+                    hits = self.client.query_points(
+                        collection_name=self.collection_name,
+                        query=query_embedding,
+                        query_filter=related_filter,
+                        limit=limit * 5,  # e.g., 15 if limit=3
+                        with_payload=True,
+                        with_vectors=False
+                    ).points
+                else:
+                    hits = initial_hits
+            else:
+                hits = initial_hits
+            
+            # Identify invalid circulars (repealed or superseded)
             repealed_circulars = set()
+            superseded_circulars = set()
+            
             for hit in hits:
                 if hit.payload.get("repealed_circulars"):
                     repealed_circulars.update(hit.payload["repealed_circulars"])
+                if hit.payload.get("superseded_circulars"):
+                    superseded_circulars.update(hit.payload["superseded_circulars"])
             
+            invalid_circulars = repealed_circulars | superseded_circulars
+            
+            # Filter and sort hits
+            filtered_hits = []
             for hit in hits:
                 circular_number = hit.payload.get("circular_number")
-                if prefer_effective and circular_number in repealed_circulars:
+                if prefer_effective and circular_number in invalid_circulars:
                     continue
                 filtered_hits.append(hit)
             
-            # Sort by score and effective_date (newer first)
-            filtered_hits.sort(key=lambda x: (
-                x.score,
-                x.payload.get("effective_date", "") or ""
-            ), reverse=True)
-            
+            filtered_hits.sort(
+                key=lambda x: (x.score, x.payload.get("effective_date", "0000-00-00")),
+                reverse=True
+            )
             filtered_hits = filtered_hits[:limit]
             
+            # Format results
             return [
                 {
                     "id": hit.id,
                     "score": hit.score,
                     "text": hit.payload["text"],
                     "source": hit.payload["source"],
-                    "metadata": {k: v for k, v in hit.payload.items() if k not in ["text", "source"]}
+                    "metadata": {
+                        k: v 
+                        for k, v in hit.payload.items() 
+                        if k not in ["text", "source"]
+                    }
                 }
                 for hit in filtered_hits
             ]
+    
         except Exception as e:
             logger.error(f"Failed to search similar documents: {e}")
             return []
-
 class LLMResponseGenerator:
     def __init__(self, model_name: str = "llama-3.1-8b-instant"):
         self.groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
@@ -372,6 +510,7 @@ class LLMResponseGenerator:
         metadata_info = ""
         for meta in metadata_list:
             metadata_info += f"\nDocument from {meta['source_file']}:\n"
+            
             if meta.get('circular_number'):
                 metadata_info += f"Circular Number: {meta['circular_number']}\n"
             if meta.get('title'):
@@ -382,19 +521,27 @@ class LLMResponseGenerator:
                 metadata_info += f"Effective Date: {meta['effective_date']}\n"
             if meta.get('repealed_circulars'):
                 metadata_info += f"Repealed Circulars: {', '.join(meta['repealed_circulars'])}\n"
-                
+            if meta.get('superseded_circulars'):
+                metadata_info += f"Superseded Circulars: {', '.join(meta['superseded_circulars'])}\n"
+            if meta.get('amended_circulars'):
+                metadata_info += f"Amended Circulars: {', '.join(meta['amended_circulars'])}\n"
+
         return f"""
-        Answer the question based on the context provided below. Prioritize information from documents that are effective 
-        (not listed in any 'repealed_circulars'). If multiple documents are relevant, prefer the one with the most recent effective_date. 
+        Answer the question based on the context provided below. Prioritize information from documents that are effective
+        (not listed in any 'repealed_circulars' or 'superseded_circulars'). For documents listed in 'amended_circulars', 
+        include information from both the original and the amendments, preferring updates from the amendments.
+
+        If multiple documents are relevant, prefer the one with the most recent effective_date.
         Cite the circular number, source file, and effective date in your response.
+        Important: Always provide answer strictly based on the context provided, do not make assumptions or provide information not present in the documents.
 
         Document Metadata:
         {metadata_info}
 
         Context: {context}
-        
+
         Question: {query}
-        
+
         Provide a concise answer and include citations with circular numbers, source files, and effective dates where applicable.
         """
 
@@ -472,9 +619,11 @@ if __name__ == "__main__":
         conn.close()
 
     rag_system = RAGSystem(data_dir=DATA_DIR)
+    # Force recreate once to add indexes; later set to False
+    rag_system.vector_db.initialize_collection(force_recreate=True)
     rag_system.initialize_system()
     
-    query = "How many casual leaves are allowed for a month?"
+    query = "How many casual leaves are allowed per month?"
     result = rag_system.query(query)
     
     print(f"\nQuestion: {result['question']}")
