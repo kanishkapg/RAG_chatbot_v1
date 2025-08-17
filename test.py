@@ -35,7 +35,7 @@ class DocumentProcessor:
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
         self.groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-        self.model_name = "llama-3.1-8b-instant"
+        self.model_name = "openai/gpt-oss-120b"
 
     def _extract_metadata(self, text: str, source_file: str) -> Dict:
         """Extract metadata using LLM and store in PostgreSQL."""
