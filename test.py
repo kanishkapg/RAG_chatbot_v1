@@ -474,7 +474,7 @@ if __name__ == "__main__":
     rag_system = RAGSystem(data_dir=DATA_DIR)
     rag_system.initialize_system()
     
-    query = "How many casual leaves are allowed for a month?"
+    query = "What is the latest maternity leave policy at SLT?"
     result = rag_system.query(query)
     
     print(f"\nQuestion: {result['question']}")
