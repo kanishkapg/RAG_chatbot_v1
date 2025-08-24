@@ -85,6 +85,7 @@ class DocumentProcessor:
             if json_start != -1 and json_end != -1:
                 json_str = metadata_str[json_start:json_end]
                 metadata = json.loads(json_str)
+                metadata["source_file"] = source_file
                 
                 if isinstance(metadata, dict):
                     validated_metadata = self._validate_metadata(metadata)
@@ -474,7 +475,7 @@ if __name__ == "__main__":
     rag_system = RAGSystem(data_dir=DATA_DIR)
     rag_system.initialize_system()
     
-    query = "What is the latest maternity leave policy at SLT?"
+    query = "What is the maternity leave policy at SLT?"
     result = rag_system.query(query)
     
     print(f"\nQuestion: {result['question']}")
