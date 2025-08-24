@@ -46,17 +46,36 @@ class DocumentProcessor:
         1. Document/circular numbers (often after "Circular No:", "Reference:", "No:", etc.)
         2. Titles or subjects (often after "Subject:", "Re:", "Title:", etc.)  
         3. Dates (issued date, effective date, etc.)
-        4. Any references to superseded/repealed/canceled documents
-        5. Department or issuing authority information
+        4. Department or issuing authority information
+        5. Policy category/area that this circular addresses
         
+        6. Document Relationships; Any references to superseded/repealed/amended documents. Classify them based on the exact language (VERY IMPORTANT):
+           - Documents this circular REPEALS (look for terms like "repeals", "cancels", "revokes", "terminates", "withdraws")
+           - Documents this circular AMENDS (look for terms like "amends", "modifies", "updates", "revises", "extends")
+           - Documents this circular SUPERSEDES (look for terms like "supersedes", "replaces", "substitutes", "overrides")
+           - Documents this circular REFERENCES (look for terms like "refers to", "with reference to", "as per", "in accordance with")
+        
+        7. Versioning Information:
+           - Version number if available
+           - Previous versions if mentioned
+                    
         Return ONLY a valid JSON object with these exact fields:
         {{
             "circular_number": "string or null",
             "title": "string or null", 
             "issued_date": "string or null",
             "effective_date": "string or null",
-            "repealed_circulars": ["array of strings"],
+            "policy_category": "string or null",
+            "department": "string or null",
+            "document_relationships": {{
+                "repeals": ["array of circular numbers"],
+                "amends": ["array of circular numbers"],
+                "supersedes": ["array of circular numbers"],
+                "references": ["array of circular numbers"]
+            }},
             "other": {{"key": "value"}},
+            "version": "string or null",
+            "previous_versions": ["array of strings"],
             "source_file": "string"
         }}
         
@@ -138,8 +157,17 @@ class DocumentProcessor:
             "title": None,
             "issued_date": None,
             "effective_date": None,
-            "repealed_circulars": [],
+            "policy_category": None,
+            "department": None,
+            "document_relationships": {
+                "repeals": [],
+                "amends": [],
+                "supersedes": [],
+                "references": []
+            },
             "other": {},
+            "version": None,
+            "previous_versions": [],
             "source_file": source_file
         }
 
@@ -309,9 +337,12 @@ class VectorDatabaseManager:
             filtered_hits = []
             repealed_circulars = set()
             for hit in hits:
-                if hit.payload.get("repealed_circulars"):
-                    repealed_circulars.update(hit.payload["repealed_circulars"])
-            
+                # Get all repealed circulars from document relationships
+                if hit.payload.get("document_relationships"):
+                    relationships = hit.payload["document_relationships"]
+                    if relationships.get("repeals"):
+                        repealed_circulars.update(relationships["repeals"])
+
             for hit in hits:
                 circular_number = hit.payload.get("circular_number")
                 if prefer_effective and circular_number in repealed_circulars:
@@ -381,8 +412,16 @@ class LLMResponseGenerator:
                 metadata_info += f"Issued Date: {meta['issued_date']}\n"
             if meta.get('effective_date'):
                 metadata_info += f"Effective Date: {meta['effective_date']}\n"
-            if meta.get('repealed_circulars'):
-                metadata_info += f"Repealed Circulars: {', '.join(meta['repealed_circulars'])}\n"
+            if meta.get('document_relationships'):
+                relationships = meta['document_relationships']
+                if relationships.get('repeals') and relationships['repeals']:
+                    metadata_info += f"Repeals: {', '.join(relationships['repeals'])}\n"
+                if relationships.get('amends') and relationships['amends']:
+                    metadata_info += f"Amends: {', '.join(relationships['amends'])}\n"
+                if relationships.get('supersedes') and relationships['supersedes']:
+                    metadata_info += f"Supersedes: {', '.join(relationships['supersedes'])}\n"
+                if relationships.get('references') and relationships['references']:
+                    metadata_info += f"References: {', '.join(relationships['references'])}\n"
                 
         return f"""
         Answer the question based on the context provided below. Prioritize information from documents that are effective 
@@ -475,7 +514,7 @@ if __name__ == "__main__":
     rag_system = RAGSystem(data_dir=DATA_DIR)
     rag_system.initialize_system()
     
-    query = "What is the maternity leave policy at SLT?"
+    query = "What is the maternity leave policy at SLT effective from 2024?"
     result = rag_system.query(query)
     
     print(f"\nQuestion: {result['question']}")
