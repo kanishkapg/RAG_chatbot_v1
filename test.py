@@ -15,6 +15,8 @@ from config import DATA_DIR, POSTGRES_CONFIG
 import logging
 from typing import List, Dict, Optional
 
+from graph_manager import Neo4jManager
+
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -36,6 +38,7 @@ class DocumentProcessor:
         self.chunk_overlap = chunk_overlap
         self.groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
         self.model_name = "openai/gpt-oss-120b"
+        self.graph_manager = Neo4jManager()
 
     def _extract_metadata(self, text: str, source_file: str) -> Dict:
         """Extract metadata using LLM and store in PostgreSQL."""
@@ -149,6 +152,14 @@ class DocumentProcessor:
             logger.error(f"Failed to store metadata for {metadata['source_file']}: {e}")
         finally:
             conn.close()
+            
+        # New Neo4j storage
+        try:
+            self.graph_manager.add_document(metadata)
+            logger.info(f"Added document {metadata.get('circular_number', metadata['source_file'])} to Neo4j")
+        except Exception as e:
+            logger.error(f"Failed to add document to Neo4j: {e}")
+            
 
     def _get_default_metadata(self, source_file: str) -> Dict:
         """Return default metadata when extraction fails."""
@@ -444,10 +455,14 @@ class RAGSystem:
         self.document_processor = DocumentProcessor()
         self.vector_db = VectorDatabaseManager()
         self.llm = LLMResponseGenerator()
+        self.graph_manager = Neo4jManager()
 
     def initialize_system(self) -> None:
         logger.info("Processing PDFs and extracting text...")
         extracted_texts = process_all_pdfs(self.data_dir)
+        
+        logger.info("Initializing Neo4j constraints...")
+        self.graph_manager.create_constraints()
         
         logger.info("Processing documents and extracting metadata...")
         documents = self.document_processor.load_and_split_documents()
@@ -456,7 +471,23 @@ class RAGSystem:
         logger.info("Initializing vector database...")
         self.vector_db.initialize_collection()
         self.vector_db.upsert_documents(documents)
+        
+        logger.info("Visualizing document relationships...")
+        visualization_path = self.graph_manager.visualize_document_relationships()
+        logger.info(f"Graph visualization saved to {visualization_path}")
+        
         logger.info("RAG system initialization complete!")
+        
+    
+    def find_effective_circular(self, circular_number: str) -> Dict:
+        """Find if a circular is still effective or has been replaced."""
+        return self.graph_manager.find_effective_document(circular_number)
+    
+        
+    def generate_visualization(self) -> str:
+        """Generate and return the path to the visualization file."""
+        return self.graph_manager.visualize_document_relationships()
+    
 
     def query(self, question: str) -> Dict:
         try:
@@ -514,7 +545,7 @@ if __name__ == "__main__":
     rag_system = RAGSystem(data_dir=DATA_DIR)
     rag_system.initialize_system()
     
-    query = "What is the maternity leave policy at SLT effective from 2024?"
+    query = "Give me a summary of maternity leave policy after 2021 on each year?"
     result = rag_system.query(query)
     
     print(f"\nQuestion: {result['question']}")
@@ -525,3 +556,19 @@ if __name__ == "__main__":
         print(f"\nID: {doc['id']}, Score: {doc['score']:.4f}")
         print(f"Text: {doc['text'][:200]}...")
         print(f"Metadata: {doc['metadata']}")
+        
+     # Test graph functionality - find if a circular is still effective
+    print("\nTesting graph database functionality:")
+    # Let's check if Circular No. 10/2022 is still effective
+    circular_status = rag_system.find_effective_circular("10/2022")
+    if circular_status:
+        if circular_status["is_effective"]:
+            print(f"Circular {circular_status['original']} is still effective")
+        else:
+            print(f"Circular {circular_status['original']} has been replaced by: {', '.join(circular_status['replaced_by'])}")
+    else:
+        print("Circular not found in the database")
+    
+    # Generate visualization
+    viz_path = rag_system.generate_visualization()
+    print(f"\nDocument relationship visualization generated at: {viz_path}")

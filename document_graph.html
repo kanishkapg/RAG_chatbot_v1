@@ -1,0 +1,163 @@
+<html>
+    <head>
+        <meta charset="utf-8">
+        
+            <script src="lib/bindings/utils.js"></script>
+            <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.2/dist/dist/vis-network.min.css" integrity="sha512-WgxfT5LWjfszlPHXRmBWHkV2eceiWTOBvrKCNbdgDYTHrT2AeLCGbF4sZlZw3UMN3WtL0tGUoIAKsu8mllg/XA==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+            <script src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.2/dist/vis-network.min.js" integrity="sha512-LnvoEWDFrqGHlHmDD2101OrLcbsfkrzoSpvtSQtxK3RMnRV0eOkhhBN2dXHKRrUU8p2DGRTk35n4O8nWSVe1mQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+            
+        
+<center>
+<h1></h1>
+</center>
+
+<!-- <link rel="stylesheet" href="../node_modules/vis/dist/vis.min.css" type="text/css" />
+<script type="text/javascript" src="../node_modules/vis/dist/vis.js"> </script>-->
+        <link
+          href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.0-beta3/dist/css/bootstrap.min.css"
+          rel="stylesheet"
+          integrity="sha384-eOJMYsd53ii+scO/bJGFsiCZc+5NDVN2yr8+0RDqr0Ql0h+rP48ckxlpbzKgwra6"
+          crossorigin="anonymous"
+        />
+        <script
+          src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.0-beta3/dist/js/bootstrap.bundle.min.js"
+          integrity="sha384-JEW9xMcG8R+pH31jmWH6WWP0WintQrMb4s7ZOdauHnUtxwoG2vI5DkLtS3qm9Ekf"
+          crossorigin="anonymous"
+        ></script>
+
+
+        <center>
+          <h1></h1>
+        </center>
+        <style type="text/css">
+
+             #mynetwork {
+                 width: 100%;
+                 height: 800px;
+                 background-color: #ffffff;
+                 border: 1px solid lightgray;
+                 position: relative;
+                 float: left;
+             }
+
+             
+
+             
+
+             
+        </style>
+    </head>
+
+
+    <body>
+        <div class="card" style="width: 100%">
+            
+            
+            <div id="mynetwork" class="card-body"></div>
+        </div>
+
+        
+        
+
+        <script type="text/javascript">
+
+              // initialize global variables.
+              var edges;
+              var nodes;
+              var allNodes;
+              var allEdges;
+              var nodeColors;
+              var originalNodes;
+              var network;
+              var container;
+              var options, data;
+              var filter = {
+                  item : '',
+                  property : '',
+                  value : []
+              };
+
+              
+
+              
+
+              // This method is responsible for drawing the graph, returns the drawn network
+              function drawGraph() {
+                  var container = document.getElementById('mynetwork');
+
+                  
+
+                  // parsing and collecting nodes and edges from the python
+                  nodes = new vis.DataSet([{"color": "#97c2fc", "id": "19/2020", "label": "19/2020\nMaternity Leave Policy\n3 December, 2020", "shape": "dot", "title": "CHRO\u0027s Circular No. 19-2020"}, {"color": "#97c2fc", "id": "33/2020", "label": "33/2020\nMaternity Leave Policy\n21 September, 2020", "shape": "dot", "title": "CHRO\u2019s Circular No. 33-2020"}, {"color": "#97c2fc", "id": "49/2019", "label": "49/2019\nAmendment to Maternity Leave Policy\n27 November, 2019", "shape": "dot", "title": "CHRO\u2019s Circular No. 49-2019"}, {"color": "#97c2fc", "id": "11/2017", "label": "11/2017\nAmendment to Employee Leave Policy (Circular No. 26/2015)\n22 January, 2017", "shape": "dot", "title": "GCEO\u0027s Circular No. 11-2017"}, {"color": "#97c2fc", "id": "Circular No. 26/2015", "label": "Circular No. 26/2015\n\n", "shape": "dot", "title": null}, {"color": "#97c2fc", "id": "26/2018", "label": "26/2018\nMaternity Leave Policy\n17 August, 2018", "shape": "dot", "title": "CHRO\u0027s Circular No. 26-2018"}, {"color": "#97c2fc", "id": "34/2016", "label": "34/2016\nMaternity Leave Policy\n17 June, 2016", "shape": "dot", "title": "CHRO\u0027s Circular No. 34-2016"}, {"color": "#97c2fc", "id": "03/2024", "label": "03/2024\nMaternity Leave Policy\n10 January, 2024", "shape": "dot", "title": "CHRO\u0027s Circular No. 03-2024"}, {"color": "#97c2fc", "id": "05/2022", "label": "05/2022\nMaternity Leave Policy\n5 February, 2022", "shape": "dot", "title": "CHRO\u0027s Circular No. 05-2022"}, {"color": "#97c2fc", "id": "12/2021", "label": "12/2021\nMaternity Leave Policy\n10 March, 2021", "shape": "dot", "title": "CHRO\u0027s Circular No. 12-2021"}, {"color": "#97c2fc", "id": "08/2023", "label": "08/2023\nMaternity Leave Policy\n20 January, 2023", "shape": "dot", "title": "CHRO\u0027s Circular No. 08-2023"}, {"color": "#97c2fc", "id": "01/2023", "label": "01/2023\nMaternity Leave Policy\n18 December, 2022", "shape": "dot", "title": "CHRO\u2019s Circular No. 01-2023"}, {"color": "#97c2fc", "id": "28/2020", "label": "28/2020\nEmployee Leave Policy\n17 April, 2020", "shape": "dot", "title": "GCEO\u0027s Circular No. 28-2020"}, {"color": "#97c2fc", "id": "67/2019", "label": "67/2019\nEmployee Code of Conduct and Disciplinary Regulations\n17 April, 2019", "shape": "dot", "title": "CHRO\u0027s Circular No. 67-2019"}, {"color": "#97c2fc", "id": "26/2015", "label": "26/2015\nEmployee Leave Policy\n15 March, 2015", "shape": "dot", "title": "GCEO\u0027s Circular No. 26-2015"}]);
+                  edges = new vis.DataSet([{"arrows": "to", "color": "blue", "from": "19/2020", "title": "AMENDS", "to": "33/2020"}, {"arrows": "to", "color": "blue", "from": "33/2020", "title": "AMENDS", "to": "49/2019"}, {"arrows": "to", "color": "blue", "from": "11/2017", "title": "AMENDS", "to": "Circular No. 26/2015"}, {"arrows": "to", "color": "red", "from": "26/2018", "title": "REPEALS", "to": "34/2016"}, {"arrows": "to", "color": "blue", "from": "49/2019", "title": "AMENDS", "to": "26/2018"}, {"arrows": "to", "color": "gray", "from": "05/2022", "title": "REFERENCES", "to": "12/2021"}, {"arrows": "to", "color": "red", "from": "08/2023", "title": "REPEALS", "to": "01/2023"}, {"arrows": "to", "color": "red", "from": "12/2021", "title": "REPEALS", "to": "33/2020"}, {"arrows": "to", "color": "blue", "from": "12/2021", "title": "AMENDS", "to": "33/2020"}, {"arrows": "to", "color": "blue", "from": "28/2020", "title": "AMENDS", "to": "11/2017"}]);
+
+                  nodeColors = {};
+                  allNodes = nodes.get({ returnType: "Object" });
+                  for (nodeId in allNodes) {
+                    nodeColors[nodeId] = allNodes[nodeId].color;
+                  }
+                  allEdges = edges.get({ returnType: "Object" });
+                  // adding nodes and edges to the graph
+                  data = {nodes: nodes, edges: edges};
+
+                  var options = {
+    "configure": {
+        "enabled": false
+    },
+    "edges": {
+        "color": {
+            "inherit": true
+        },
+        "smooth": {
+            "enabled": true,
+            "type": "dynamic"
+        }
+    },
+    "interaction": {
+        "dragNodes": true,
+        "hideEdgesOnDrag": false,
+        "hideNodesOnDrag": false
+    },
+    "physics": {
+        "barnesHut": {
+            "avoidOverlap": 0,
+            "centralGravity": 0.3,
+            "damping": 0.09,
+            "gravitationalConstant": -80000,
+            "springConstant": 0.001,
+            "springLength": 250
+        },
+        "enabled": true,
+        "stabilization": {
+            "enabled": true,
+            "fit": true,
+            "iterations": 1000,
+            "onlyDynamicEdges": false,
+            "updateInterval": 50
+        }
+    }
+};
+
+                  
+
+
+                  
+
+                  network = new vis.Network(container, data, options);
+
+                  
+
+                  
+
+                  
+
+
+                  
+
+                  return network;
+
+              }
+              drawGraph();
+        </script>
+    </body>
+</html>
