@@ -1,0 +1,231 @@
+from sentence_transformers import SentenceTransformer
+from langchain_community.document_loaders import TextLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from groq import Groq
+import os
+from typing import List, Dict
+import json
+import logging
+
+from src.db import get_db_connection
+from graph_manager import Neo4jManager
+
+logger = logging.getLogger(__name__)
+
+
+class DocumentProcessor:
+    def __init__(self, chunk_size: int = 1000, chunk_overlap: int = 200):
+        self.chunk_size = chunk_size
+        self.chunk_overlap = chunk_overlap
+        self.groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+        self.model_name = "openai/gpt-oss-120b"
+        self.graph_manager = Neo4jManager()
+
+    def _extract_metadata(self, text: str, source_file: str) -> Dict:
+        """Extract metadata using LLM and store in PostgreSQL."""
+        prompt = f"""
+        You are an expert at extracting metadata from official documents and circulars. 
+        
+        Analyze the following text from {source_file} and extract metadata in VALID JSON format. Look carefully for:
+        1. Document/circular numbers (often after "Circular No:", "Reference:", "No:", etc.)
+        2. Titles or subjects (often after "Subject:", "Re:", "Title:", etc.)  
+        3. Dates (issued date, effective date, etc.)
+        4. Department or issuing authority information
+        5. Policy category/area that this circular addresses
+        
+        6. Document Relationships; Any references to superseded/repealed/amended documents. Classify them based on the exact language (VERY IMPORTANT):
+           - Documents this circular REPEALS (look for terms like "repeals", "cancels", "revokes", "terminates", "withdraws")
+           - Documents this circular AMENDS (look for terms like "amends", "modifies", "updates", "revises", "extends")
+           - Documents this circular SUPERSEDES (look for terms like "supersedes", "replaces", "substitutes", "overrides")
+           - Documents this circular REFERENCES (look for terms like "refers to", "with reference to", "as per", "in accordance with")
+        
+        7. Versioning Information:
+           - Version number if available
+           - Previous versions if mentioned
+                    
+        Return ONLY a valid JSON object with these exact fields:
+        {{
+            "circular_number": "string or null",
+            "title": "string or null", 
+            "issued_date": "string or null",
+            "effective_date": "string or null",
+            "policy_category": "string or null",
+            "department": "string or null",
+            "document_relationships": {{
+                "repeals": ["array of circular numbers"],
+                "amends": ["array of circular numbers"],
+                "supersedes": ["array of circular numbers"],
+                "references": ["array of circular numbers"]
+            }},
+            "other": {{"key": "value"}},
+            "version": "string or null",
+            "previous_versions": ["array of strings"],
+            "source_file": "string"
+        }}
+        
+        Document text:
+        {text}
+        
+        JSON Response:"""
+        
+        try:
+            response = self.groq_client.chat.completions.create(
+                messages=[
+                    {"role": "system", "content": "You are a precise metadata extractor. Respond only with valid JSON."},
+                    {"role": "user", "content": prompt}
+                ],
+                model=self.model_name,
+                max_tokens=800,
+                temperature=0.1
+            )
+            
+            metadata_str = response.choices[0].message.content.strip()
+            logger.info(f"LLM Response for {source_file}: {metadata_str}")
+            
+            json_start = metadata_str.find('{')
+            json_end = metadata_str.rfind('}') + 1
+            
+            if json_start != -1 and json_end != -1:
+                json_str = metadata_str[json_start:json_end]
+                metadata = json.loads(json_str)
+                metadata["source_file"] = source_file
+                
+                if isinstance(metadata, dict):
+                    validated_metadata = self._validate_metadata(metadata)
+                    # Store metadata in PostgreSQL
+                    self._store_metadata(validated_metadata)
+                    logger.info(f"Successfully extracted and stored metadata for {source_file}: {validated_metadata}")
+                    return validated_metadata
+            
+            logger.warning(f"Failed to parse JSON for {source_file}, returning default metadata")
+            default_metadata = self._get_default_metadata(source_file)
+            self._store_metadata(default_metadata)
+            return default_metadata
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON parsing error for {source_file}: {e}, returning default metadata")
+            default_metadata = self._get_default_metadata(source_file)
+            self._store_metadata(default_metadata)
+            return default_metadata
+        except Exception as e:
+            logger.error(f"Error with LLM extraction for {source_file}: {e}, returning default metadata")
+            default_metadata = self._get_default_metadata(source_file)
+            self._store_metadata(default_metadata)
+            return default_metadata
+
+    def _store_metadata(self, metadata: Dict) -> None:
+        """Store metadata in PostgreSQL."""
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO document_metadata (filename, metadata, extraction_date)
+                    VALUES (%s, %s, CURRENT_TIMESTAMP)
+                    ON CONFLICT (filename) DO UPDATE
+                    SET metadata = %s, extraction_date = CURRENT_TIMESTAMP
+                    """,
+                    (metadata["source_file"], json.dumps(metadata), json.dumps(metadata))
+                )
+            conn.commit()
+            logger.info(f"Stored metadata for {metadata['source_file']} in PostgreSQL")
+        except Exception as e:
+            logger.error(f"Failed to store metadata for {metadata['source_file']}: {e}")
+        finally:
+            conn.close()
+            
+        # New Neo4j storage
+        try:
+            self.graph_manager.add_document(metadata)
+            logger.info(f"Added document {metadata.get('circular_number', metadata['source_file'])} to Neo4j")
+        except Exception as e:
+            logger.error(f"Failed to add document to Neo4j: {e}")
+            
+
+    def _get_default_metadata(self, source_file: str) -> Dict:
+        """Return default metadata when extraction fails."""
+        return {
+            "circular_number": None,
+            "title": None,
+            "issued_date": None,
+            "effective_date": None,
+            "policy_category": None,
+            "department": None,
+            "document_relationships": {
+                "repeals": [],
+                "amends": [],
+                "supersedes": [],
+                "references": []
+            },
+            "other": {},
+            "version": None,
+            "previous_versions": [],
+            "source_file": source_file
+        }
+
+    def _validate_metadata(self, metadata: Dict) -> Dict:
+        default_metadata = self._get_default_metadata(metadata.get("source_file", "unknown"))
+        
+        for key in default_metadata:
+            if key not in metadata:
+                metadata[key] = default_metadata[key]
+        
+        for key, value in metadata.items():
+            if isinstance(value, str) and (value.strip() == "" or value.lower() in ["null", "none", "n/a"]):
+                metadata[key] = None
+            elif isinstance(value, list) and len(value) == 0:
+                metadata[key] = []
+        
+        return metadata
+
+    def load_and_split_documents(self) -> List[Dict]:
+        """Load documents from PostgreSQL and split into chunks."""
+        chunked_docs = []
+        
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT pdf_files.filename, extracted_text, document_metadata.metadata 
+                    FROM pdf_files 
+                    LEFT JOIN document_metadata 
+                    ON pdf_files.filename = document_metadata.filename
+                    """
+                )
+                rows = cur.fetchall()
+                
+                for filename, extracted_text, metadata in rows:
+                    if not extracted_text:
+                        logger.warning(f"No extracted text for {filename}, skipping")
+                        continue
+                        
+                    # If no metadata exists, extract it
+                    if not metadata:
+                        metadata = self._extract_metadata(extracted_text, filename)
+                    
+                    text_splitter = RecursiveCharacterTextSplitter(
+                        chunk_size=self.chunk_size,
+                        chunk_overlap=self.chunk_overlap,
+                        length_function=len,
+                        separators=["\n\n", "\n", " ", ""]
+                    )
+                    
+                    # Create a mock document for splitting
+                    from langchain.docstore.document import Document
+                    doc = Document(page_content=extracted_text, metadata={"source_file": filename})
+                    docs = text_splitter.split_documents([doc])
+                    
+                    for i, doc_chunk in enumerate(docs):
+                        chunked_docs.append({
+                            "page_content": doc_chunk.page_content,
+                            "metadata": {
+                                **metadata,
+                                "chunk_id": i + 1,
+                                "total_chunks": len(docs)
+                            }
+                        })
+        finally:
+            conn.close()
+        
+        return chunked_docs
