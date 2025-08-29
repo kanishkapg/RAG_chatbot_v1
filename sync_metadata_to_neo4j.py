@@ -12,7 +12,7 @@ import logging
 from dotenv import load_dotenv
 load_dotenv('.env', override=True)
 
-from graph_manager import Neo4jManager
+from src.graph_manager import Neo4jManager
 from config import POSTGRES_CONFIG
 import psycopg2
 

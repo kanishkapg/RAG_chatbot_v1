@@ -1,0 +1,49 @@
+{
+  "aliases": {
+    "maternity leave": { "path": ["leave_policy", "maternity_leave_policy"] },
+    "maternity leave policy": { "path": ["leave_policy", "maternity_leave_policy"] },
+    "pregnancy leave": { "path": ["leave_policy", "maternity_leave_policy"] },
+    "paternity leave": { "path": ["leave_policy", "paternity_leave_policy"] },
+    "paternity leave policy": { "path": ["leave_policy", "paternity_leave_policy"] },
+    "maternity and paternity leave": { "path": ["leave_policy"] },
+    "maternity and paternity leave policy": { "path": ["leave_policy"] },
+    "employee leave": { "path": ["leave_policy"] },
+    "employee leave policy": { "path": ["leave_policy"] },
+    "leave policy": { "path": ["leave_policy"] },
+    "tariff": { "path": ["pricing", "tariff"] },
+    "pricing circular": { "path": ["pricing"] },
+    "employee code of conduct": { "path": ["employee_regulations", "code_of_conduct"] },
+    "employee code of conduct and disciplinary regulations": { "path": ["employee_regulations", "code_of_conduct"] },
+    "disciplinary regulations": { "path": ["employee_regulations", "code_of_conduct"] }
+  },
+  "tree": {
+    "leave_policy": {
+      "path": ["leave_policy"],
+      "children": {
+        "maternity_leave_policy": {
+          "path": ["leave_policy", "maternity_leave_policy"]
+        },
+        "paternity_leave_policy": {
+          "path": ["leave_policy", "paternity_leave_policy"]
+        },
+        "sick_leave_policy": {
+          "path": ["leave_policy", "sick_leave_policy"]
+        }
+      }
+    },
+    "pricing": {
+      "path": ["pricing"],
+      "children": {
+        "tariff": { "path": ["pricing", "tariff"] }
+      }
+    },
+    "employee_regulations": {
+      "path": ["employee_regulations"],
+      "children": {
+        "code_of_conduct": {
+          "path": ["employee_regulations", "code_of_conduct"]
+        }
+      }
+    }
+  }
+}

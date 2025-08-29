@@ -4,7 +4,7 @@ from src.document_processor import DocumentProcessor
 from src.vector_db import VectorDatabaseManager
 from src.llm_response import LLMResponseGenerator
 from src.db import ensure_tables_exist
-from graph_manager import Neo4jManager
+from src.graph_manager import Neo4jManager
 from test_tesseract import process_all_pdfs
 from config import DATA_DIR
 

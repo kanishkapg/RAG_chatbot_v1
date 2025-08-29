@@ -39,6 +39,18 @@ def ensure_tables_exist():
                 )
             """)
             cur.execute("CREATE INDEX IF NOT EXISTS idx_file_hash ON pdf_files(file_hash)")
+            # suggestion queue for taxonomy/aliases human review
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS category_suggestions (
+                    id SERIAL PRIMARY KEY,
+                    label TEXT NOT NULL,
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    reviewed BOOLEAN NOT NULL DEFAULT FALSE,
+                    reviewer TEXT,
+                    resolved_path TEXT,
+                    notes TEXT
+                )
+            """)
         conn.commit()
         logger.info("PostgreSQL tables created or verified")
     finally:
