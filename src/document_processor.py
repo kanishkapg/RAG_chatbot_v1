@@ -219,56 +219,89 @@ class DocumentProcessor:
             "source_file": source_file
         }
 
-    def _apply_implicit_supersedes(self, metadata: Dict) -> None:
+    def _apply_implicit_supersedes(self, metadata: Dict, force_refresh: bool = False) -> None:
         """
         Resolve narrative/implicit supersedes by finding older documents in the same
-        category family (partial/ancestor category matching allowed), department/roles/global overlap,
-        and issued_date < current issued_date. Update metadata.document_relationships['supersedes']
-        and persist the updated metadata.
+        category family (partial/ancestor category matching allowed), department match,
+        and issued_date < current issued_date. Instrumented logging for diagnostics.
+        
+        Args:
+            metadata: Document metadata dictionary
+            force_refresh: If True, recalculates all supersedes relationships from scratch,
+                          ignoring any existing supersedes relationships
         """
-        # basic checks
         src = metadata.get("source_file")
         if not src:
             logger.debug("_no source_file on metadata, skipping implicit supersedes")
             return
 
-        # Only run this resolution when the metadata explicitly flagged implicit supersedes
         if not metadata.get("implicit_supersedes"):
             logger.debug(f"implicit_supersedes not set for {src}; skipping implicit supersedes")
             return
 
-        # require issued_date to compare; if missing, skip
         cur_issued = metadata.get("issued_date")
         if not cur_issued:
             logger.debug(f"No issued_date for {src}; skipping implicit supersedes")
             return
 
-        try:
-            cur_dt = datetime.strptime(cur_issued, "%Y-%m-%d")
-        except Exception:
+        # try multiple common date formats for current doc
+        cur_dt = None
+        for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y"):
+            try:
+                cur_dt = datetime.strptime(cur_issued, fmt)
+                break
+            except Exception:
+                pass
+        if cur_dt is None:
             logger.debug(f"Could not parse issued_date '{cur_issued}' for {src}; skipping")
             return
 
-        category_paths = metadata.get("category_path") or []
+        # normalize current category_path shape to list-of-paths
+        def normalize_paths(paths):
+            if not paths:
+                return []
+            if isinstance(paths, list) and paths and isinstance(paths[0], list):
+                return paths
+            if isinstance(paths, list) and paths and isinstance(paths[0], str):
+                return [paths]
+            if isinstance(paths, str):
+                try:
+                    parsed = json.loads(paths)
+                    if isinstance(parsed, list):
+                        if parsed and isinstance(parsed[0], list):
+                            return parsed
+                        if parsed and isinstance(parsed[0], str):
+                            return [parsed]
+                except Exception:
+                    pass
+            return []
+
+        raw_category_paths = metadata.get("category_path") or []
+        category_paths = normalize_paths(raw_category_paths)
         if not category_paths:
-            logger.debug(f"No category_path for {src}; skipping implicit supersedes")
+            logger.debug(f"No category_path for {src}; skipping implicit supersedes; raw={raw_category_paths}")
             return
+
+        def normalize_str(s: str) -> str:
+            if not s:
+                return ""
+            s = s.replace("’", "'").replace("‘", "'")
+            s = s.lower().strip()
+            s = re.sub(r"\s+", " ", s)
+            return s
+
+        cur_dept = normalize_str(metadata.get("department"))
 
         # helper to check ancestor/partial match between two category paths
         def category_matches(target_paths, candidate_paths):
-            # return True if any candidate path is a prefix of any target path or vice-versa
             for t in target_paths:
                 for c in candidate_paths:
-                    # both are lists of strings
                     if not isinstance(t, list) or not isinstance(c, list):
                         continue
-                    # normalize lowercase
                     t_norm = [p.lower() for p in t]
                     c_norm = [p.lower() for p in c]
-                    # candidate is ancestor of target
                     if len(c_norm) <= len(t_norm) and t_norm[:len(c_norm)] == c_norm:
                         return True
-                    # target is ancestor of candidate
                     if len(t_norm) <= len(c_norm) and c_norm[:len(t_norm)] == t_norm:
                         return True
             return False
@@ -277,100 +310,109 @@ class DocumentProcessor:
         conn = get_db_connection()
         try:
             with conn.cursor() as cur:
-                # Fetch metadata for all documents; we'll filter in Python for flexible matching.
                 cur.execute("SELECT filename, metadata FROM document_metadata")
                 rows = cur.fetchall()
 
             for filename, row_meta in rows:
-                # skip self
-                if filename == src:
+                reasons = []
+                # Skip self (compare normalized filename to be safe)
+                if normalize_str(filename) == normalize_str(src):
+                    reasons.append("self")
+                    logger.debug(f"Skipping {filename}: {';'.join(reasons)}")
                     continue
 
                 try:
-                    if isinstance(row_meta, str):
-                        other = json.loads(row_meta)
-                    else:
-                        other = row_meta
+                    other = row_meta if isinstance(row_meta, dict) else json.loads(row_meta)
                 except Exception:
+                    logger.debug(f"Skipping {filename}: malformed metadata JSON")
                     continue
 
-                # prefer circular_number, fallback to source_file so we don't drop candidates
                 other_cn = other.get("circular_number") or other.get("source_file")
                 other_issued = other.get("issued_date")
-                other_paths = other.get("category_path") or []
+                other_paths_raw = other.get("category_path") or []
+                other_paths = normalize_paths(other_paths_raw)
+                other_dept = normalize_str(other.get("department"))
 
-                # require date and category_path; allow missing circular_number (we use source_file)
-                if not other_issued or not other_paths:
-                    logger.debug(f"Skipping {filename}: missing issued_date or category_path")
-                    continue
+                debug_meta = {
+                    "filename": filename,
+                    "other_cn": other_cn,
+                    "other_dept_raw": other.get("department"),
+                    "other_dept_norm": other_dept,
+                    "other_issued": other_issued,
+                    "other_paths_raw": other_paths_raw,
+                    "other_paths_norm": other_paths
+                }
 
-                # try multiple common date formats for other document
+                # Date presence
+                if not other_issued:
+                    reasons.append("missing issued_date")
+                # Category presence
+                if not other_paths:
+                    reasons.append("missing category_path")
+                # Date parse
                 other_dt = None
-                for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y"):
-                    try:
-                        other_dt = datetime.strptime(other_issued, fmt)
-                        break
-                    except Exception:
-                        pass
-                if other_dt is None:
-                    logger.debug(f"Skipping {filename}: could not parse issued_date '{other_issued}'")
-                    continue
+                if other_issued:
+                    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y"):
+                        try:
+                            other_dt = datetime.strptime(other_issued, fmt)
+                            break
+                        except Exception:
+                            pass
+                    if other_dt is None:
+                        reasons.append(f"bad issued_date_format ({other_issued})")
+                # Older check
+                if other_dt and other_dt >= cur_dt:
+                    reasons.append(f"not older (other_dt={other_dt.date()} >= cur_dt={cur_dt.date()})")
 
-                # only consider older documents
-                if other_dt >= cur_dt:
-                    logger.debug(f"Skipping {filename}: not older (other_dt >= cur_dt)")
-                    continue
+                # Category match
+                if other_paths and not category_matches(category_paths, other_paths):
+                    reasons.append("category_mismatch")
 
-                # category partial/ancestor matching
-                if not category_matches(category_paths, other_paths):
-                    continue
-
-                # department checks: require exact, non-empty department match (case-insensitive)
-                # as per new rule: do NOT fall back to roles when department is missing.
-                cur_dept = (metadata.get("department") or "").strip().lower()
-                other_dept = (other.get("department") or "").strip().lower()
-
+                # Department checks
                 if not cur_dept or not other_dept:
-                    # one or both documents lack department metadata; skip candidate
-                    continue
-                if cur_dept != other_dept:
-                    # departments differ; skip candidate
+                    reasons.append("missing department")
+                elif cur_dept != other_dept:
+                    reasons.append(f"dept_mismatch ({other_dept} != {cur_dept})")
+
+                # Decide
+                if reasons:
+                    logger.debug(f"Skipping {filename}: {', '.join(reasons)}; info={debug_meta}")
                     continue
 
+                # Passed all checks -> accept
                 candidates.append(other_cn)
+                logger.debug(f"Accepted {filename} as candidate -> {other_cn}; info={debug_meta}")
 
             logger.debug(f"Implicit supersedes candidates for {src} (pre-dedupe): {candidates}")
-
-            # dedupe
             candidates = sorted(set(candidates))
             logger.debug(f"Implicit supersedes candidates for {src} (deduped): {candidates}")
 
             if candidates:
                 metadata.setdefault("document_relationships", {}).setdefault("supersedes", [])
-                existing = set(metadata["document_relationships"].get("supersedes") or [])
-                merged = sorted(existing.union(candidates))
-                metadata["document_relationships"]["supersedes"] = merged
-                # mark applied to avoid loops
+                
+                if force_refresh:
+                    # Force refresh: replace existing supersedes with new candidates
+                    logger.info(f"Force refresh enabled for {src}: replacing existing supersedes with new candidates")
+                    metadata["document_relationships"]["supersedes"] = candidates
+                else:
+                    # Normal mode: merge with existing supersedes
+                    existing = set(metadata["document_relationships"].get("supersedes") or [])
+                    merged = sorted(existing.union(candidates))
+                    metadata["document_relationships"]["supersedes"] = merged
+                
                 metadata["_implicit_supersedes_applied"] = True
-                # persist updated metadata
-                logger.info(f"Resolved implicit supersedes for {src}: {merged}")
+                logger.info(f"Resolved implicit supersedes for {src}: {metadata['document_relationships']['supersedes']}")
                 self._store_metadata(metadata)
-
-                # --- Verification: read back and log stored value ---
+                # verification read-back (keeps previous behavior)
                 try:
                     verify_conn = get_db_connection()
                     with verify_conn.cursor() as vcur:
                         vcur.execute("SELECT metadata FROM document_metadata WHERE filename = %s", (metadata["source_file"],))
                         row = vcur.fetchone()
                         if row:
-                            try:
-                                stored = row[0] if isinstance(row[0], dict) else json.loads(row[0])
-                                stored_sup = stored.get("document_relationships", {}).get("supersedes")
-                                logger.info(f"Post-write check for {metadata['source_file']}: stored.supersedes={stored_sup}")
-                            except Exception as e:
-                                logger.error(f"Post-write parse failed for {metadata['source_file']}: {e}")
-                        else:
-                            logger.error(f"Post-write: no row found for filename={metadata['source_file']}")
+                            stored = row[0] if isinstance(row[0], dict) else json.loads(row[0])
+                            stored_sup = stored.get("document_relationships", {}).get("supersedes")
+                            logger.info(f"Post-write check for {metadata['source_file']}: stored.supersedes={stored_sup}")
                 except Exception as e:
                     logger.error(f"Post-write verification failed for {metadata['source_file']}: {e}")
                 finally:
@@ -379,7 +421,6 @@ class DocumentProcessor:
                     except Exception:
                         pass
             else:
-                # still mark applied to avoid reprocessing
                 metadata["_implicit_supersedes_applied"] = True
                 self._store_metadata(metadata)
                 logger.debug(f"No candidates found; marked _implicit_supersedes_applied for {src}")
@@ -391,6 +432,44 @@ class DocumentProcessor:
                 conn.close()
             except Exception:
                 pass
+
+    def refresh_all_implicit_supersedes(self) -> None:
+        """
+        Force refresh all implicit supersedes relationships for all documents.
+        This recalculates supersedes relationships from scratch, useful when:
+        - New documents have been added to the database
+        - You want to ensure all relationships are up to date
+        """
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as cur:
+                # Get all documents that have implicit_supersedes = True
+                cur.execute("""
+                    SELECT filename, metadata 
+                    FROM document_metadata 
+                    WHERE (metadata->>'implicit_supersedes')::boolean = true
+                """)
+                rows = cur.fetchall()
+                
+                logger.info(f"Found {len(rows)} documents with implicit_supersedes=True to refresh")
+                
+                for filename, metadata_json in rows:
+                    try:
+                        metadata = metadata_json if isinstance(metadata_json, dict) else json.loads(metadata_json)
+                        logger.info(f"Force refreshing implicit supersedes for: {filename}")
+                        
+                        # Force refresh by recalculating from scratch
+                        self._apply_implicit_supersedes(metadata, force_refresh=True)
+                        
+                    except Exception as e:
+                        logger.error(f"Failed to refresh implicit supersedes for {filename}: {e}")
+                        
+                logger.info("Completed refreshing all implicit supersedes relationships")
+                        
+        except Exception as e:
+            logger.error(f"Error during refresh_all_implicit_supersedes: {e}")
+        finally:
+            conn.close()
 
     def _validate_metadata(self, metadata: Dict) -> Dict:
         defaults = self._get_default_metadata(metadata.get("source_file", "unknown"))
