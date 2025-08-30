@@ -141,3 +141,208 @@ class VectorDatabaseManager:
         except Exception as e:
             logger.error(f"Failed to search similar documents: {e}")
             return []
+
+    def search_similar_documents_with_validation(self, query: str, limit: int = 3) -> List[Dict]:
+        """
+        Enhanced search that includes both original and replacement documents.
+        This ensures historical context is preserved while also providing current information.
+        """
+        try:
+            # Step 1: Get initial semantic matches (larger pool for validation)
+            query_embedding = self.embedding_model.encode(query).tolist()
+            initial_hits = self.client.query_points(
+                collection_name=self.collection_name,
+                query=query_embedding,
+                limit=limit * 3,  # Get more candidates initially
+                with_payload=True,
+                with_vectors=False
+            ).points
+            
+            # Step 2: Import graph manager and validate documents
+            from src.graph_manager import Neo4jManager
+            graph_manager = Neo4jManager()
+            
+            all_hits = []  # Keep ALL relevant hits
+            replacement_candidates = set()
+            processed_circulars = set()
+            superseded_circulars = set()
+            
+            # First pass: Keep all initial hits and identify replacements
+            for hit in initial_hits:
+                circular_number = hit.payload.get("circular_number")
+                if not circular_number:
+                    # No circular number, keep as is
+                    all_hits.append(hit)
+                    continue
+                
+                # Always keep the original hit for historical context
+                all_hits.append(hit)
+                
+                # Skip validation if we already processed this circular
+                if circular_number in processed_circulars:
+                    continue
+                processed_circulars.add(circular_number)
+                
+                # Check if document has been replaced using Neo4j
+                effectiveness_info = graph_manager.find_effective_document(circular_number)
+                
+                if effectiveness_info and not effectiveness_info["is_effective"]:
+                    # Document has been replaced - track it and add replacements to candidates
+                    superseded_circulars.add(circular_number)
+                    if effectiveness_info["replaced_by"]:
+                        replacement_candidates.update(effectiveness_info["replaced_by"])
+                        logger.debug(f"Document {circular_number} replaced by: {effectiveness_info['replaced_by']}")
+            
+            # Step 3: Query vector DB for replacement documents
+            if replacement_candidates:
+                logger.info(f"Searching for replacement documents: {replacement_candidates}")
+                
+                for replacement_circular in replacement_candidates:
+                    # Skip if we already have chunks from this replacement document
+                    if replacement_circular in processed_circulars:
+                        continue
+                    
+                    replacement_hits = self.client.query_points(
+                        collection_name=self.collection_name,
+                        query=query_embedding,
+                        limit=3,  # Get more chunks from replacement documents
+                        query_filter={
+                            "must": [{"key": "circular_number", "match": {"value": replacement_circular}}]
+                        },
+                        with_payload=True,
+                        with_vectors=False
+                    ).points
+                    
+                    if replacement_hits:
+                        all_hits.extend(replacement_hits)
+                        logger.debug(f"Found {len(replacement_hits)} chunks from replacement document {replacement_circular}")
+            
+            # Step 4: Enhance sorting to prioritize current documents while preserving historical ones
+            def get_sort_key(hit):
+                circular_num = hit.payload.get("circular_number")
+                is_superseded = circular_num in superseded_circulars
+                issued_date = hit.payload.get("issued_date", "")
+                
+                # Prioritize: 1) Relevance score, 2) Current documents, 3) Newer documents
+                return (
+                    hit.score,  # Primary: relevance score
+                    not is_superseded,  # Secondary: current documents first
+                    issued_date or ""  # Tertiary: newer documents first
+                )
+            
+            all_hits.sort(key=get_sort_key, reverse=True)
+            
+            # Step 5: Intelligent limiting - ensure we have both historical and current context
+            final_hits = []
+            current_count = 0
+            historical_count = 0
+            max_per_type = max(1, limit // 2)  # At least 1 of each type if available
+            
+            for hit in all_hits:
+                if len(final_hits) >= limit:
+                    break
+                    
+                circular_num = hit.payload.get("circular_number")
+                is_superseded = circular_num in superseded_circulars
+                
+                if is_superseded:
+                    if historical_count < max_per_type or current_count >= max_per_type:
+                        final_hits.append(hit)
+                        historical_count += 1
+                else:
+                    if current_count < max_per_type or historical_count >= max_per_type:
+                        final_hits.append(hit)
+                        current_count += 1
+            
+            # If we still have space and didn't get enough variety, fill remaining slots
+            remaining_hits = [hit for hit in all_hits if hit not in final_hits]
+            while len(final_hits) < limit and remaining_hits:
+                final_hits.append(remaining_hits.pop(0))
+            
+            # Close the graph manager connection
+            graph_manager.close()
+            
+            logger.info(f"Enhanced search returned {len(final_hits)} chunks ({current_count} current, {historical_count} historical) from {len(set(hit.payload.get('circular_number', 'unknown') for hit in final_hits))} documents")
+            
+            return [
+                {
+                    "id": hit.id,
+                    "score": hit.score,
+                    "text": hit.payload["text"],
+                    "source": hit.payload["source"],
+                    "metadata": {
+                        **{k: v for k, v in hit.payload.items() if k not in ["text", "source"]},
+                        "is_superseded": hit.payload.get("circular_number") in superseded_circulars
+                    }
+                }
+                for hit in final_hits
+            ]
+            
+        except Exception as e:
+            logger.error(f"Failed to search with validation: {e}")
+            # Fallback to original search method
+            return self.search_similar_documents(query, limit, prefer_effective=True)
+
+    def get_documents_by_circular(self, circular_number: str, limit: int = 10) -> List[Dict]:
+        """
+        Get all document chunks for a specific circular number.
+        Useful for debugging and understanding what content is available.
+        """
+        try:
+            hits = self.client.query_points(
+                collection_name=self.collection_name,
+                query_filter={
+                    "must": [{"key": "circular_number", "match": {"value": circular_number}}]
+                },
+                limit=limit,
+                with_payload=True,
+                with_vectors=False
+            ).points
+            
+            return [
+                {
+                    "id": hit.id,
+                    "text": hit.payload["text"],
+                    "source": hit.payload["source"],
+                    "metadata": {k: v for k, v in hit.payload.items() if k not in ["text", "source"]}
+                }
+                for hit in hits
+            ]
+        except Exception as e:
+            logger.error(f"Failed to get documents for circular {circular_number}: {e}")
+            return []
+
+    def get_collection_stats(self) -> Dict:
+        """Get statistics about the vector database collection."""
+        try:
+            if not self.client.collection_exists(self.collection_name):
+                return {"error": "Collection does not exist"}
+            
+            collection_info = self.client.get_collection(self.collection_name)
+            
+            # Get a sample of documents to analyze circular distribution
+            sample_points = self.client.scroll(
+                collection_name=self.collection_name,
+                limit=1000,
+                with_payload=True,
+                with_vectors=False
+            )[0]
+            
+            circular_counts = {}
+            total_points = len(sample_points)
+            
+            for point in sample_points:
+                circular_num = point.payload.get("circular_number", "Unknown")
+                circular_counts[circular_num] = circular_counts.get(circular_num, 0) + 1
+            
+            return {
+                "total_vectors": collection_info.vectors_count,
+                "vector_size": collection_info.config.params.vectors.size,
+                "distance_metric": collection_info.config.params.vectors.distance.name,
+                "sample_size": total_points,
+                "unique_circulars": len(circular_counts),
+                "circular_distribution": dict(sorted(circular_counts.items(), key=lambda x: x[1], reverse=True)[:10])
+            }
+        except Exception as e:
+            logger.error(f"Failed to get collection stats: {e}")
+            return {"error": str(e)}

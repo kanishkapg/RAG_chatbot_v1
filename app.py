@@ -23,6 +23,15 @@ chat_tab, graph_tab = st.tabs(["Chat", "Document Graph"])
 with chat_tab:
     st.subheader("Chat with your Documents")
     
+    # Add controls for search method
+    col1, col2 = st.columns([3, 1])
+    with col2:
+        use_validation = st.checkbox(
+            "Use Graph Validation", 
+            value=True, 
+            help="Validates document effectiveness using Neo4j graph relationships to ensure answers come from current, non-superseded documents"
+        )
+    
     # Initialize chat history
     if "messages" not in st.session_state:
         st.session_state.messages = []
@@ -43,15 +52,46 @@ with chat_tab:
         with st.chat_message("user"):
             st.markdown(query)
         
-        # Get response from system
+        # Get response from system with validation option
         with st.spinner("Thinking..."):
-            result = rag_system.query(query)
+            result = rag_system.query(query, use_graph_validation=use_validation)
         
         # Display assistant response
         with st.chat_message("assistant"):
             st.markdown(result["answer"])
+            
+            # Enhanced source information
             if result["sources"]:
-                st.caption(f"Sources: {', '.join(result['sources'])}")
+                sources_info = f"Sources: {', '.join(result['sources'])}"
+            else:
+                sources_info = "No sources found"
+            
+            validation_info = "✅ Graph Validated" if result.get("validation_used", False) else "⚠️ Standard Search"
+            
+            # Show document status breakdown if graph validation was used
+            if result.get("validation_used", False) and result.get("relevant_documents"):
+                current_docs = []
+                historical_docs = []
+                
+                for doc in result["relevant_documents"]:
+                    circular = doc["metadata"].get("circular_number", "Unknown")
+                    is_superseded = doc["metadata"].get("is_superseded", False)
+                    
+                    if is_superseded:
+                        historical_docs.append(circular)
+                    else:
+                        current_docs.append(circular)
+                
+                doc_status = []
+                if current_docs:
+                    doc_status.append(f"Current: {', '.join(set(current_docs))}")
+                if historical_docs:
+                    doc_status.append(f"Historical: {', '.join(set(historical_docs))}")
+                
+                if doc_status:
+                    sources_info += f" | {' | '.join(doc_status)}"
+            
+            st.caption(f"{sources_info} | {validation_info}")
         
         # Add assistant message to chat history
         st.session_state.messages.append(

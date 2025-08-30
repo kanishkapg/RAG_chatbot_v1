@@ -36,39 +36,65 @@ class LLMResponseGenerator:
             }
 
     def _build_prompt(self, query: str, context: str, sources: List[str], metadata_list: List[Dict]) -> str:
-        metadata_info = ""
+        # Separate current and historical documents
+        current_docs = []
+        historical_docs = []
+        
         for meta in metadata_list:
-            metadata_info += f"\nDocument from {meta['source_file']}:\n"
+            doc_info = f"\nDocument from {meta['source_file']}:\n"
             if meta.get('circular_number'):
-                metadata_info += f"Circular Number: {meta['circular_number']}\n"
+                doc_info += f"Circular Number: {meta['circular_number']}\n"
             if meta.get('title'):
-                metadata_info += f"Title: {meta['title']}\n"
+                doc_info += f"Title: {meta['title']}\n"
             if meta.get('issued_date'):
-                metadata_info += f"Issued Date: {meta['issued_date']}\n"
+                doc_info += f"Issued Date: {meta['issued_date']}\n"
             if meta.get('effective_date'):
-                metadata_info += f"Effective Date: {meta['effective_date']}\n"
+                doc_info += f"Effective Date: {meta['effective_date']}\n"
+            
+            # Check if document is superseded
+            is_superseded = meta.get('is_superseded', False)
+            if is_superseded:
+                doc_info += f"Status: SUPERSEDED/HISTORICAL\n"
+                historical_docs.append(doc_info)
+            else:
+                doc_info += f"Status: CURRENT/EFFECTIVE\n"
+                current_docs.append(doc_info)
+            
+            # Add relationship information
             if meta.get('document_relationships'):
                 relationships = meta['document_relationships']
                 if relationships.get('repeals') and relationships['repeals']:
-                    metadata_info += f"Repeals: {', '.join(relationships['repeals'])}\n"
+                    doc_info += f"Repeals: {', '.join(relationships['repeals'])}\n"
                 if relationships.get('amends') and relationships['amends']:
-                    metadata_info += f"Amends: {', '.join(relationships['amends'])}\n"
+                    doc_info += f"Amends: {', '.join(relationships['amends'])}\n"
                 if relationships.get('supersedes') and relationships['supersedes']:
-                    metadata_info += f"Supersedes: {', '.join(relationships['supersedes'])}\n"
+                    doc_info += f"Supersedes: {', '.join(relationships['supersedes'])}\n"
                 if relationships.get('references') and relationships['references']:
-                    metadata_info += f"References: {', '.join(relationships['references'])}\n"
-                
+                    doc_info += f"References: {', '.join(relationships['references'])}\n"
+        
+        # Build metadata sections
+        current_metadata = "".join(current_docs) if current_docs else "None available"
+        historical_metadata = "".join(historical_docs) if historical_docs else "None available"
+        
         return f"""
-        Answer the question based on the context provided below. Prioritize information from documents that are effective 
-        (not listed in any 'repealed_circulars'). If multiple documents are relevant, prefer the one with the most recent effective_date. 
-        Cite the circular number, source file, and effective date in your response.
+        Answer the question based on the context provided below. You have access to both current and historical documents.
 
-        Document Metadata:
-        {metadata_info}
+        CURRENT/EFFECTIVE DOCUMENTS (prioritize for current policies):
+        {current_metadata}
+
+        HISTORICAL/SUPERSEDED DOCUMENTS (use for historical context and evolution):
+        {historical_metadata}
 
         Context: {context}
         
         Question: {query}
         
-        Provide a concise answer and include citations with circular numbers, source files, and effective dates where applicable.
+        Instructions:
+        1. For questions about current policies, prioritize CURRENT/EFFECTIVE documents
+        2. For questions about historical policies or policy evolution, use HISTORICAL documents as well
+        3. When showing policy changes over time, clearly indicate the timeframe and status of each policy
+        4. Always cite the circular number, source file, effective date, and document status
+        5. If a document is superseded, mention what replaced it if available
+        
+        Provide a comprehensive answer that addresses the question appropriately using both current and historical context where relevant.
         """

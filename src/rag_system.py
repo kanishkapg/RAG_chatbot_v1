@@ -51,9 +51,24 @@ class RAGSystem:
         return self.graph_manager.visualize_document_relationships()
     
 
-    def query(self, question: str) -> Dict:
+    def query(self, question: str, use_graph_validation: bool = True) -> Dict:
+        """
+        Query the RAG system with optional graph validation.
+        
+        Args:
+            question: The user's question
+            use_graph_validation: Whether to use Neo4j graph validation for ensuring 
+                                document effectiveness (default: True)
+        """
         try:
-            hits = self.vector_db.search_similar_documents(question)
+            if use_graph_validation:
+                # Use the enhanced search with graph validation
+                hits = self.vector_db.search_similar_documents_with_validation(question)
+                logger.info("Using graph-validated document retrieval")
+            else:
+                # Use the original search method
+                hits = self.vector_db.search_similar_documents(question)
+                logger.info("Using standard document retrieval")
             
             context = " ".join([hit["text"] for hit in hits])
             sources = list(set([hit["source"] for hit in hits]))
@@ -65,7 +80,8 @@ class RAGSystem:
                 "question": question,
                 "answer": response["answer"],
                 "sources": response["sources"],
-                "relevant_documents": hits
+                "relevant_documents": hits,
+                "validation_used": use_graph_validation
             }
         except Exception as e:
             logger.error(f"Failed to process query: {e}")
@@ -73,7 +89,8 @@ class RAGSystem:
                 "question": question,
                 "answer": "Error processing query",
                 "sources": [],
-                "relevant_documents": []
+                "relevant_documents": [],
+                "validation_used": use_graph_validation
             }
 
 
