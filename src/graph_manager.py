@@ -52,88 +52,137 @@ class Neo4jManager:
         if not circular_number:
             logger.warning(f"No circular number for {metadata.get('source_file')}, using filename as identifier")
             circular_number = metadata.get("source_file")
-        
-        with self.driver.session() as session:
-            # Create or update Document node
-            session.run("""
-                MERGE (d:Document {circular_number: $circular_number})
-                SET d.title = $title,
-                    d.issued_date = $issued_date,
-                    d.effective_date = $effective_date,
-                    d.policy_category_raw = $policy_category_raw,
-                    d.category_path = $category_path,
-                    d.policy_category = $policy_category,
-                    d.departments = $departments,
-                    d.roles = $roles,
-                    d.global = $global,
-                    d.source_file = $source_file,
-                    d.version = $version,
-                    d.filename = $filename
-            """, {
-                "circular_number": circular_number,
-                "title": metadata.get("title"),
-                "issued_date": metadata.get("issued_date"),
-                "effective_date": metadata.get("effective_date"),
-                "policy_category_raw": metadata.get("policy_category_raw"),
-                "category_path": metadata.get("category_path") or [],
-                "policy_category": metadata.get("policy_category"),
-                "departments": metadata.get("departments") or [],
-                "roles": metadata.get("roles") or [],
-                "global": metadata.get("global", False),
-                "source_file": metadata.get("source_file"),
-                "version": metadata.get("version"),
-                "filename": metadata.get("source_file")
-            })
-            
-            logger.info(f"Added/updated document node for {circular_number}")
-            
-            # Add relationships based on document_relationships
-            relationships = metadata.get("document_relationships", {})
-            
-            # Process REPEALS relationships
-            for repealed_doc in relationships.get("repeals", []):
-                session.run("""
-                    MATCH (a:Document {circular_number: $doc_a})
-                    MERGE (b:Document {circular_number: $doc_b})
-                    MERGE (a)-[r:REPEALS]->(b)
-                """, {"doc_a": circular_number, "doc_b": repealed_doc})
-                logger.info(f"Added REPEALS relationship: {circular_number} -> {repealed_doc}")
-            
-            # Process AMENDS relationships
-            for amended_doc in relationships.get("amends", []):
-                session.run("""
-                    MATCH (a:Document {circular_number: $doc_a})
-                    MERGE (b:Document {circular_number: $doc_b})
-                    MERGE (a)-[r:AMENDS]->(b)
-                """, {"doc_a": circular_number, "doc_b": amended_doc})
-                logger.info(f"Added AMENDS relationship: {circular_number} -> {amended_doc}")
+        # sanitize inputs to avoid nested-collections (Neo4j doesn't allow list-of-lists in properties)
+        def _normalize_list(x):
+            if x is None:
+                return []
+            if isinstance(x, str):
+                return [x]
+            if isinstance(x, list):
+                out = []
+                for item in x:
+                    if isinstance(item, list):
+                        # join hierarchical path into a single string
+                        out.append(" > ".join([str(p) for p in item if p is not None]))
+                    else:
+                        out.append(str(item))
+                return out
+            return [str(x)]
 
-            # Process EXTENDS relationships
-            for extended_doc in relationships.get("extends", []):
+        category_path_raw = metadata.get("category_path") or []
+        # convert possible list-of-lists into list of strings
+        category_path_safe = []
+        if isinstance(category_path_raw, list):
+            for p in category_path_raw:
+                if isinstance(p, list):
+                    category_path_safe.append(" > ".join([str(part) for part in p if part is not None]))
+                else:
+                    category_path_safe.append(str(p))
+        else:
+            category_path_safe = [str(category_path_raw)]
+
+        departments = _normalize_list(metadata.get("departments"))
+        roles = _normalize_list(metadata.get("roles"))
+
+        try:
+            with self.driver.session() as session:
+                # Create or update Document node (use sanitized properties)
                 session.run("""
-                    MATCH (a:Document {circular_number: $doc_a})
-                    MERGE (b:Document {circular_number: $doc_b})
-                    MERGE (a)-[r:EXTENDS]->(b)
-                """, {"doc_a": circular_number, "doc_b": extended_doc})
-                logger.info(f"Added EXTENDS relationship: {circular_number} -> {extended_doc}")
-            
-            # Process SUPERSEDES relationships
-            for superseded_doc in relationships.get("supersedes", []):
-                session.run("""
-                    MATCH (a:Document {circular_number: $doc_a})
-                    MERGE (b:Document {circular_number: $doc_b})
-                    MERGE (a)-[r:SUPERSEDES]->(b)
-                """, {"doc_a": circular_number, "doc_b": superseded_doc})
-                logger.info(f"Added SUPERSEDES relationship: {circular_number} -> {superseded_doc}")
-            
-            # Process REFERENCES relationships
-            for referenced_doc in relationships.get("references", []):
-                session.run("""
-                    MATCH (a:Document {circular_number: $doc_a})
-                    MERGE (b:Document {circular_number: $doc_b})
-                    MERGE (a)-[r:REFERENCES]->(b)
-                """, {"doc_a": circular_number, "doc_b": referenced_doc})
-                logger.info(f"Added REFERENCES relationship: {circular_number} -> {referenced_doc}")
+                    MERGE (d:Document {circular_number: $circular_number})
+                    SET d.title = $title,
+                        d.issued_date = $issued_date,
+                        d.effective_date = $effective_date,
+                        d.policy_category_raw = $policy_category_raw,
+                        d.category_path = $category_path,
+                        d.policy_category = $policy_category,
+                        d.departments = $departments,
+                        d.roles = $roles,
+                        d.global = $global,
+                        d.source_file = $source_file,
+                        d.version = $version,
+                        d.filename = $filename
+                """, {
+                    "circular_number": circular_number,
+                    "title": metadata.get("title"),
+                    "issued_date": metadata.get("issued_date"),
+                    "effective_date": metadata.get("effective_date"),
+                    "policy_category_raw": metadata.get("policy_category_raw"),
+                    "category_path": category_path_safe,
+                    "policy_category": metadata.get("policy_category"),
+                    "departments": departments,
+                    "roles": roles,
+                    "global": metadata.get("global", False),
+                    "source_file": metadata.get("source_file"),
+                    "version": metadata.get("version"),
+                    "filename": metadata.get("source_file")
+                })
+
+                logger.info(f"Added/updated document node for {circular_number}")
+
+                # Add relationships based on document_relationships (validate targets are scalars)
+                relationships = metadata.get("document_relationships", {}) or {}
+
+                def _iter_valid_targets(key):
+                    vals = relationships.get(key, [])
+                    if not isinstance(vals, list):
+                        return []
+                    for v in vals:
+                        if v is None:
+                            continue
+                        # skip nested collections
+                        if isinstance(v, (list, dict)):
+                            logger.warning(f"Skipping malformed relationship target for {key}: {v}")
+                            continue
+                        yield str(v)
+
+                # Process REPEALS relationships
+                for repealed_doc in _iter_valid_targets("repeals"):
+                    session.run("""
+                        MATCH (a:Document {circular_number: $doc_a})
+                        MERGE (b:Document {circular_number: $doc_b})
+                        MERGE (a)-[r:REPEALS]->(b)
+                    """, {"doc_a": circular_number, "doc_b": repealed_doc})
+                    logger.info(f"Added REPEALS relationship: {circular_number} -> {repealed_doc}")
+
+                # Process AMENDS relationships
+                for amended_doc in _iter_valid_targets("amends"):
+                    session.run("""
+                        MATCH (a:Document {circular_number: $doc_a})
+                        MERGE (b:Document {circular_number: $doc_b})
+                        MERGE (a)-[r:AMENDS]->(b)
+                    """, {"doc_a": circular_number, "doc_b": amended_doc})
+                    logger.info(f"Added AMENDS relationship: {circular_number} -> {amended_doc}")
+
+                # Process EXTENDS relationships
+                for extended_doc in _iter_valid_targets("extends"):
+                    session.run("""
+                        MATCH (a:Document {circular_number: $doc_a})
+                        MERGE (b:Document {circular_number: $doc_b})
+                        MERGE (a)-[r:EXTENDS]->(b)
+                    """, {"doc_a": circular_number, "doc_b": extended_doc})
+                    logger.info(f"Added EXTENDS relationship: {circular_number} -> {extended_doc}")
+
+                # Process SUPERSEDES relationships
+                for superseded_doc in _iter_valid_targets("supersedes"):
+                    session.run("""
+                        MATCH (a:Document {circular_number: $doc_a})
+                        MERGE (b:Document {circular_number: $doc_b})
+                        MERGE (a)-[r:SUPERSEDES]->(b)
+                    """, {"doc_a": circular_number, "doc_b": superseded_doc})
+                    logger.info(f"Added SUPERSEDES relationship: {circular_number} -> {superseded_doc}")
+
+                # Process REFERENCES relationships
+                for referenced_doc in _iter_valid_targets("references"):
+                    session.run("""
+                        MATCH (a:Document {circular_number: $doc_a})
+                        MERGE (b:Document {circular_number: $doc_b})
+                        MERGE (a)-[r:REFERENCES]->(b)
+                    """, {"doc_a": circular_number, "doc_b": referenced_doc})
+                    logger.info(f"Added REFERENCES relationship: {circular_number} -> {referenced_doc}")
+
+        except Exception as e:
+            logger.error(f"Failed to add/update document {circular_number} in Neo4j: {e}")
+            return False
 
         # After node creation, optionally expand implicit edges if flagged
         try:

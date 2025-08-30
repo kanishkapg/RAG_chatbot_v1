@@ -6,6 +6,8 @@ import os
 from typing import List, Dict
 import json
 import logging
+from datetime import datetime
+import re
 
 from src.db import get_db_connection
 from src.graph_manager import Neo4jManager
@@ -32,24 +34,26 @@ class DocumentProcessor:
         1. Document/circular numbers
         2. Titles or subjects
         3. Dates (issued date, effective date, etc.)
-        4. Department or issuing authority information
+        4. Department or issuing authority information (CHRO,GCEO,CAO,CFO etc.)
         5. Policy category/area that this circular addresses (both raw label and hierarchical category path if possible)
         6. Document Relationships (REPEALS, AMENDS, SUPERSEDES, REFERENCES, EXTENDS)
         7. Versioning Information
         
-        Return ONLY a valid JSON object with these exact fields:
+    Additionally, detect whether the text contains a narrative supersede (for example "This circular supersedes all prior maternity/paternity policies" or "will supersede all circulars issued in this respect") where no explicit circular numbers are listed. If such a narrative supersede exists, set "implicit_supersedes": true and provide an optional short "supersedes_scope" string describing the scope (e.g. "maternity/paternity policies" or "policies in this category for HR").
+
+    Return ONLY a valid JSON object with these exact fields:
         {{
             "circular_number": "string or null",
             "title": "string or null", 
-            "issued_date": "string or null",
-            "effective_date": "string or null",
-            "policy_category": "string or null",   // legacy single label
+            "issued_date": "string or null", //YYYY−MM−DD format
+            "effective_date": "date or null",  //YYYY−MM−DD format
+            "policy_category": "date or null",   // legacy single label
             "policy_category_raw": "string or null", // raw extracted label
             "category_path": ["array of strings"], // hierarchical path if known
-            "department": "string or null",
-            "departments": ["array of strings"],
+            "department": "string or null", // CHRO,GCEO,CAO,CFO etc. Don't include any other things
             "roles": ["array of strings"],
-            "global": true or false,
+            "implicit_supersedes": true or false,
+            "supersedes_scope": "string or null",
             "document_relationships": {{
                 "repeals": ["array of circular numbers"],
                 "amends": ["array of circular numbers"],
@@ -116,33 +120,42 @@ class DocumentProcessor:
                 metadata["category_path"] = cat_paths if cat_paths else []
 
 
-                # ---- Department Normalization ----
-                if not isinstance(metadata.get("departments"), list):
-                    dept = metadata.get("department")
-                    metadata["departments"] = [dept] if dept else []
-
                 # ---- Roles ----
                 if not isinstance(metadata.get("roles"), list):
                     metadata["roles"] = []
 
-                # ---- Global Flag ----
-                metadata["global"] = bool(metadata.get("global", False))
-
                 # ---- Implicit supersession detection ----
-                lower_text = text.lower()
-                implicit_phrases = [
-                    "in this respect",
-                    "in this regard",
-                    "insofar as",
-                    "in so far as",
-                    "to the extent",
-                    "in that respect",
-                    "in this behalf"
-                ]
-                metadata["_implicit_actions"] = any(ph in lower_text for ph in implicit_phrases)
+                # look for sentences that indicate superseding without explicit circular numbers
+                # e.g. "This circular supersedes all prior maternity/paternity policies, effective 1 February 2024." 
+                # We'll set `implicit_supersedes` boolean and try to capture a short `supersedes_scope` phrase.
+                metadata["implicit_supersedes"] = False
+                metadata["supersedes_scope"] = None
+
+                supersede_regex = re.compile(r"(?:this\s+circular\s+)?(supersede|supersedes|will\s+supersede|shall\s+supersede|superseding)\s+(all\s+prior\s+)?(?P<scope>[^.,;\n]+)", re.IGNORECASE)
+                m = supersede_regex.search(text)
+                if m:
+                    # heuristically accept matches that mention policies, circulars, or similar
+                    scope = m.groupdict().get("scope")
+                    if scope and re.search(r"policy|policies|circular|circulars|notice|guideline|procedure|rule", scope, re.IGNORECASE):
+                        metadata["implicit_supersedes"] = True
+                        # trim trailing words and punctuation
+                        scope = scope.strip().strip(' .;:,')
+                        # limit length
+                        if len(scope) > 150:
+                            scope = scope[:150].rsplit(' ', 1)[0]
+                        metadata["supersedes_scope"] = scope
 
                 validated_metadata = self._validate_metadata(metadata)
+                # store initial metadata
                 self._store_metadata(validated_metadata)
+
+                # If implicit supersession phrases were detected by the LLM/text detector, try to resolve them
+                try:
+                    if validated_metadata.get("implicit_supersedes") and not validated_metadata.get("_implicit_supersedes_applied"):
+                        self._apply_implicit_supersedes(validated_metadata)
+                except Exception as e:
+                    logger.error(f"Error applying implicit supersedes for {source_file}: {e}")
+
                 return validated_metadata
             
             logger.warning(f"Failed to parse JSON for {source_file}, returning default metadata")
@@ -192,9 +205,7 @@ class DocumentProcessor:
             "policy_category_raw": None,
             "category_path": [],
             "department": None,
-            "departments": [],
             "roles": [],
-            "global": False,
             "document_relationships": {
                 "repeals": [],
                 "amends": [],
@@ -207,6 +218,179 @@ class DocumentProcessor:
             "previous_versions": [],
             "source_file": source_file
         }
+
+    def _apply_implicit_supersedes(self, metadata: Dict) -> None:
+        """
+        Resolve narrative/implicit supersedes by finding older documents in the same
+        category family (partial/ancestor category matching allowed), department/roles/global overlap,
+        and issued_date < current issued_date. Update metadata.document_relationships['supersedes']
+        and persist the updated metadata.
+        """
+        # basic checks
+        src = metadata.get("source_file")
+        if not src:
+            logger.debug("_no source_file on metadata, skipping implicit supersedes")
+            return
+
+        # Only run this resolution when the metadata explicitly flagged implicit supersedes
+        if not metadata.get("implicit_supersedes"):
+            logger.debug(f"implicit_supersedes not set for {src}; skipping implicit supersedes")
+            return
+
+        # require issued_date to compare; if missing, skip
+        cur_issued = metadata.get("issued_date")
+        if not cur_issued:
+            logger.debug(f"No issued_date for {src}; skipping implicit supersedes")
+            return
+
+        try:
+            cur_dt = datetime.strptime(cur_issued, "%Y-%m-%d")
+        except Exception:
+            logger.debug(f"Could not parse issued_date '{cur_issued}' for {src}; skipping")
+            return
+
+        category_paths = metadata.get("category_path") or []
+        if not category_paths:
+            logger.debug(f"No category_path for {src}; skipping implicit supersedes")
+            return
+
+        # helper to check ancestor/partial match between two category paths
+        def category_matches(target_paths, candidate_paths):
+            # return True if any candidate path is a prefix of any target path or vice-versa
+            for t in target_paths:
+                for c in candidate_paths:
+                    # both are lists of strings
+                    if not isinstance(t, list) or not isinstance(c, list):
+                        continue
+                    # normalize lowercase
+                    t_norm = [p.lower() for p in t]
+                    c_norm = [p.lower() for p in c]
+                    # candidate is ancestor of target
+                    if len(c_norm) <= len(t_norm) and t_norm[:len(c_norm)] == c_norm:
+                        return True
+                    # target is ancestor of candidate
+                    if len(t_norm) <= len(c_norm) and c_norm[:len(t_norm)] == t_norm:
+                        return True
+            return False
+
+        candidates = []
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as cur:
+                # Fetch metadata for all documents; we'll filter in Python for flexible matching.
+                cur.execute("SELECT filename, metadata FROM document_metadata")
+                rows = cur.fetchall()
+
+            for filename, row_meta in rows:
+                # skip self
+                if filename == src:
+                    continue
+
+                try:
+                    if isinstance(row_meta, str):
+                        other = json.loads(row_meta)
+                    else:
+                        other = row_meta
+                except Exception:
+                    continue
+
+                # prefer circular_number, fallback to source_file so we don't drop candidates
+                other_cn = other.get("circular_number") or other.get("source_file")
+                other_issued = other.get("issued_date")
+                other_paths = other.get("category_path") or []
+
+                # require date and category_path; allow missing circular_number (we use source_file)
+                if not other_issued or not other_paths:
+                    logger.debug(f"Skipping {filename}: missing issued_date or category_path")
+                    continue
+
+                # try multiple common date formats for other document
+                other_dt = None
+                for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y"):
+                    try:
+                        other_dt = datetime.strptime(other_issued, fmt)
+                        break
+                    except Exception:
+                        pass
+                if other_dt is None:
+                    logger.debug(f"Skipping {filename}: could not parse issued_date '{other_issued}'")
+                    continue
+
+                # only consider older documents
+                if other_dt >= cur_dt:
+                    logger.debug(f"Skipping {filename}: not older (other_dt >= cur_dt)")
+                    continue
+
+                # category partial/ancestor matching
+                if not category_matches(category_paths, other_paths):
+                    continue
+
+                # department checks: require exact, non-empty department match (case-insensitive)
+                # as per new rule: do NOT fall back to roles when department is missing.
+                cur_dept = (metadata.get("department") or "").strip().lower()
+                other_dept = (other.get("department") or "").strip().lower()
+
+                if not cur_dept or not other_dept:
+                    # one or both documents lack department metadata; skip candidate
+                    continue
+                if cur_dept != other_dept:
+                    # departments differ; skip candidate
+                    continue
+
+                candidates.append(other_cn)
+
+            logger.debug(f"Implicit supersedes candidates for {src} (pre-dedupe): {candidates}")
+
+            # dedupe
+            candidates = sorted(set(candidates))
+            logger.debug(f"Implicit supersedes candidates for {src} (deduped): {candidates}")
+
+            if candidates:
+                metadata.setdefault("document_relationships", {}).setdefault("supersedes", [])
+                existing = set(metadata["document_relationships"].get("supersedes") or [])
+                merged = sorted(existing.union(candidates))
+                metadata["document_relationships"]["supersedes"] = merged
+                # mark applied to avoid loops
+                metadata["_implicit_supersedes_applied"] = True
+                # persist updated metadata
+                logger.info(f"Resolved implicit supersedes for {src}: {merged}")
+                self._store_metadata(metadata)
+
+                # --- Verification: read back and log stored value ---
+                try:
+                    verify_conn = get_db_connection()
+                    with verify_conn.cursor() as vcur:
+                        vcur.execute("SELECT metadata FROM document_metadata WHERE filename = %s", (metadata["source_file"],))
+                        row = vcur.fetchone()
+                        if row:
+                            try:
+                                stored = row[0] if isinstance(row[0], dict) else json.loads(row[0])
+                                stored_sup = stored.get("document_relationships", {}).get("supersedes")
+                                logger.info(f"Post-write check for {metadata['source_file']}: stored.supersedes={stored_sup}")
+                            except Exception as e:
+                                logger.error(f"Post-write parse failed for {metadata['source_file']}: {e}")
+                        else:
+                            logger.error(f"Post-write: no row found for filename={metadata['source_file']}")
+                except Exception as e:
+                    logger.error(f"Post-write verification failed for {metadata['source_file']}: {e}")
+                finally:
+                    try:
+                        verify_conn.close()
+                    except Exception:
+                        pass
+            else:
+                # still mark applied to avoid reprocessing
+                metadata["_implicit_supersedes_applied"] = True
+                self._store_metadata(metadata)
+                logger.debug(f"No candidates found; marked _implicit_supersedes_applied for {src}")
+
+        except Exception as e:
+            logger.error(f"Failed to compute implicit supersedes for {src}: {e}")
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
     def _validate_metadata(self, metadata: Dict) -> Dict:
         defaults = self._get_default_metadata(metadata.get("source_file", "unknown"))
