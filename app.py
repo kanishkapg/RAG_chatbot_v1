@@ -1,7 +1,7 @@
 import streamlit as st
 import json
 import os
-from test import RAGSystem
+from src.rag_system import RAGSystem
 from config import DATA_DIR
 
 st.set_page_config(layout="wide", page_title="RAG Chatbot")
