@@ -1,47 +1,119 @@
 {
   "aliases": {
-    "maternity leave": { "path": ["leave_policy", "maternity_leave_policy"] },
-    "maternity leave policy": { "path": ["leave_policy", "maternity_leave_policy"] },
-    "pregnancy leave": { "path": ["leave_policy", "maternity_leave_policy"] },
-    "paternity leave": { "path": ["leave_policy", "paternity_leave_policy"] },
-    "paternity leave policy": { "path": ["leave_policy", "paternity_leave_policy"] },
-    "maternity and paternity leave": { "path": ["leave_policy"] },
-    "maternity and paternity leave policy": { "path": ["leave_policy"] },
-    "employee leave": { "path": ["leave_policy"] },
-    "employee leave policy": { "path": ["leave_policy"] },
-    "leave policy": { "path": ["leave_policy"] },
-    "tariff": { "path": ["pricing", "tariff"] },
-    "pricing circular": { "path": ["pricing"] },
-    "employee code of conduct": { "path": ["employee_regulations", "code_of_conduct"] },
-    "employee code of conduct and disciplinary regulations": { "path": ["employee_regulations", "code_of_conduct"] },
-    "disciplinary regulations": { "path": ["employee_regulations", "code_of_conduct"] }
-  },
-  "tree": {
-    "leave_policy": {
-      "path": ["leave_policy"],
-      "children": {
-        "maternity_leave_policy": {
-          "path": ["leave_policy", "maternity_leave_policy"]
-        },
-        "paternity_leave_policy": {
-          "path": ["leave_policy", "paternity_leave_policy"]
-        },
-        "sick_leave_policy": {
-          "path": ["leave_policy", "sick_leave_policy"]
+    "distress loan": {
+      "path": ["employee_benefits", "loans", "distress_loan_policy"]
+    },
+    "distress loan policy": {
+      "path": ["employee_benefits", "loans", "distress_loan_policy"]
+    },
+    "distress loan facility": {
+      "path": ["employee_benefits", "loans", "distress_loan_policy"]
+    },
+    "distress loan interest rate": {
+      "path": ["employee_benefits", "loans", "distress_loan_policy"]
+    },
+    "staff loan": { "path": ["employee_benefits", "loans"] },
+    "staff loan policy": { "path": ["employee_benefits", "loans"] },
+    "employee loan": { "path": ["employee_benefits", "loans"] },
+    "employee loan policy": { "path": ["employee_benefits", "loans"] },
+    "loan policy": { "path": ["employee_benefits", "loans"] },
+    "bill adjustment": {
+      "path": ["financial_controls", "billing_policy", "bill_adjustment_policy"]
+    },
+    "bill adjustment policy": {
+      "path": ["financial_controls", "billing_policy", "bill_adjustment_policy"]
+    },
+    "bill adjustment approval": {
+      "path": [
+        "financial_controls",
+        "billing_policy",
+        "bill_adjustment_approval_committee"
+      ]
+    },
+    "baac": {
+      "path": [
+        "financial_controls",
+        "billing_policy",
+        "bill_adjustment_approval_committee"
+      ]
+    },
+    "bill adjustment approval committee": {
+      "path": [
+        "financial_controls",
+        "billing_policy",
+        "bill_adjustment_approval_committee"
+      ]
+    },
+    "billing policy": { "path": ["financial_controls", "billing_policy"] },
+    "financial approval": {
+      "path": ["financial_controls", "delegation_of_financial_authority"]
+    },
+    "delegation of financial authority": {
+      "path": ["financial_controls", "delegation_of_financial_authority"]
+    },
+    "doa": {
+      "path": ["financial_controls", "delegation_of_financial_authority"]
+    },
+    "financial authority": {
+      "path": ["financial_controls", "delegation_of_financial_authority"]
+    },
+    "purchase approval": {
+      "path": ["financial_controls", "delegation_of_financial_authority"]
+    },
+    "budget authorization": {
+      "path": ["financial_controls", "delegation_of_financial_authority"]
+    },
+    "budget control": {
+      "path": ["financial_controls", "delegation_of_financial_authority"]
+    },
+    "tender board": {
+      "path": ["financial_controls", "delegation_of_financial_authority"]
+    },
+    "junior tender board": {
+      "path": ["financial_controls", "delegation_of_financial_authority"]
+    },
+    "senior tender board": {
+      "path": ["financial_controls", "delegation_of_financial_authority"]
+    },
+    "tree": {
+      "employee_benefits": {
+        "path": ["employee_benefits"],
+        "children": {
+          "loans": {
+            "path": ["employee_benefits", "loans"],
+            "children": {
+              "distress_loan_policy": {
+                "path": ["employee_benefits", "loans", "distress_loan_policy"]
+              }
+            }
+          }
         }
-      }
-    },
-    "pricing": {
-      "path": ["pricing"],
-      "children": {
-        "tariff": { "path": ["pricing", "tariff"] }
-      }
-    },
-    "employee_regulations": {
-      "path": ["employee_regulations"],
-      "children": {
-        "code_of_conduct": {
-          "path": ["employee_regulations", "code_of_conduct"]
+      },
+      "financial_controls": {
+        "path": ["financial_controls"],
+        "children": {
+          "billing_policy": {
+            "path": ["financial_controls", "billing_policy"],
+            "children": {
+              "bill_adjustment_policy": {
+                "path": [
+                  "financial_controls",
+                  "billing_policy",
+                  "bill_adjustment_policy"
+                ]
+              },
+              "bill_adjustment_approval_committee": {
+                "path": [
+                  "financial_controls",
+                  "billing_policy",
+                  "bill_adjustment_approval_committee"
+                ]
+              }
+            }
+          },
+          "delegation_of_financial_authority": {
+            "path": ["financial_controls", "delegation_of_financial_authority"]
+          }
         }
       }
     }

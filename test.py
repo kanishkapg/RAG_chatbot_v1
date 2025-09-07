@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 def main():
     rag_system = build_and_initialize()
 
-    query = " What is the maternity leave policy of the years 2018,2020 and 2023? "
+    query = "How much is CEO allowed to approve for international payments? and what are those categories?"
     result = rag_system.query(query)
 
     print(f"\nQuestion: {result['question']}")

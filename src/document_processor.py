@@ -68,100 +68,121 @@ class DocumentProcessor:
         }}
         
         Document text:
-        {text}
+        {text[:2000]}
         
         JSON Response:"""
         
         try:
             response = self.groq_client.chat.completions.create(
                 messages=[
-                    {"role": "system", "content": "You are a precise metadata extractor. Respond only with valid JSON."},
+                    {"role": "system", "content": "You are a precise metadata extractor. Respond only with valid JSON. Ensure the JSON is complete and properly closed."},
                     {"role": "user", "content": prompt}
                 ],
                 model=self.model_name,
-                max_tokens=800,
+                max_tokens=1200,  # Increased from 800
                 temperature=0.1
             )
             
             metadata_str = response.choices[0].message.content.strip()
-            logger.info(f"LLM Response for {source_file}: {metadata_str}")
+            logger.info(f"Raw LLM Response for {source_file}: {metadata_str}")
             
+            # More robust JSON extraction
             json_start = metadata_str.find('{')
-            json_end = metadata_str.rfind('}') + 1
+            if json_start == -1:
+                logger.warning(f"No JSON found in LLM response for {source_file}")
+                default_metadata = self._get_default_metadata(source_file)
+                self._store_metadata(default_metadata)
+                return default_metadata
             
-            if json_start != -1 and json_end != -1:
-                metadata = json.loads(metadata_str[json_start:json_end])
-                metadata["source_file"] = source_file
+            # Find the last complete closing brace
+            brace_count = 0
+            json_end = -1
+            for i, char in enumerate(metadata_str[json_start:], json_start):
+                if char == '{':
+                    brace_count += 1
+                elif char == '}':
+                    brace_count -= 1
+                    if brace_count == 0:
+                        json_end = i + 1
+                        break
+            
+            if json_end == -1:
+                logger.warning(f"Incomplete JSON in LLM response for {source_file}")
+                default_metadata = self._get_default_metadata(source_file)
+                self._store_metadata(default_metadata)
+                return default_metadata
+            
+            json_str = metadata_str[json_start:json_end]
+            logger.info(f"Extracted JSON for {source_file}: {json_str}")
+            
+            try:
+                metadata = json.loads(json_str)
+            except json.JSONDecodeError as e:
+                logger.error(f"JSON decode error for {source_file}: {e}")
+                logger.error(f"Problematic JSON: {json_str}")
+                default_metadata = self._get_default_metadata(source_file)
+                self._store_metadata(default_metadata)
+                return default_metadata
+            
+            metadata["source_file"] = source_file
 
-                # ---- Category Normalization ----
-                raw_cat = metadata.get("policy_category_raw") or metadata.get("policy_category")
-                metadata["policy_category_raw"] = raw_cat
+            # ---- Category Normalization ----
+            raw_cat = metadata.get("policy_category_raw") or metadata.get("policy_category")
+            metadata["policy_category_raw"] = raw_cat
 
-                # ---- Category Normalization & Multi-Detection ----
-                cat_paths = []
+            # ---- Category Normalization & Multi-Detection ----
+            cat_paths = []
 
-                if raw_cat:
-                    normalized = self.taxonomy.normalize(raw_cat)
-                    if normalized:
-                        cat_paths.append(normalized)
-                    else:
-                        try:
-                            conn = get_db_connection()
-                            self.taxonomy.suggest_unknown(raw_cat, conn)
-                        except Exception:
-                            pass
+            if raw_cat:
+                normalized = self.taxonomy.normalize(raw_cat)
+                if normalized:
+                    cat_paths.append(normalized)
+                else:
+                    try:
+                        conn = get_db_connection()
+                        self.taxonomy.suggest_unknown(raw_cat, conn)
+                    except Exception:
+                        pass
 
-                # Fallback: also scan document text for multiple categories
-                detected = self.taxonomy.match_multiple(text)
-                for path in detected:
-                    if path not in cat_paths:
-                        cat_paths.append(path)
+            # Fallback: also scan document text for multiple categories
+            detected = self.taxonomy.match_multiple(text)
+            for path in detected:
+                if path not in cat_paths:
+                    cat_paths.append(path)
 
-                metadata["category_path"] = cat_paths if cat_paths else []
+            metadata["category_path"] = cat_paths if cat_paths else []
 
+            # ---- Roles ----
+            if not isinstance(metadata.get("roles"), list):
+                metadata["roles"] = []
 
-                # ---- Roles ----
-                if not isinstance(metadata.get("roles"), list):
-                    metadata["roles"] = []
+            # ---- Implicit supersession detection ----
+            metadata["implicit_supersedes"] = metadata.get("implicit_supersedes", False)
+            metadata["supersedes_scope"] = metadata.get("supersedes_scope")
 
-                # ---- Implicit supersession detection ----
-                # look for sentences that indicate superseding without explicit circular numbers
-                # e.g. "This circular supersedes all prior maternity/paternity policies, effective 1 February 2024." 
-                # We'll set `implicit_supersedes` boolean and try to capture a short `supersedes_scope` phrase.
-                metadata["implicit_supersedes"] = False
-                metadata["supersedes_scope"] = None
-
+            if not metadata["implicit_supersedes"]:
                 supersede_regex = re.compile(r"(?:this\s+circular\s+)?(supersede|supersedes|will\s+supersede|shall\s+supersede|superseding)\s+(all\s+prior\s+)?(?P<scope>[^.,;\n]+)", re.IGNORECASE)
                 m = supersede_regex.search(text)
                 if m:
-                    # heuristically accept matches that mention policies, circulars, or similar
                     scope = m.groupdict().get("scope")
                     if scope and re.search(r"policy|policies|circular|circulars|notice|guideline|procedure|rule", scope, re.IGNORECASE):
                         metadata["implicit_supersedes"] = True
-                        # trim trailing words and punctuation
                         scope = scope.strip().strip(' .;:,')
-                        # limit length
                         if len(scope) > 150:
                             scope = scope[:150].rsplit(' ', 1)[0]
                         metadata["supersedes_scope"] = scope
 
-                validated_metadata = self._validate_metadata(metadata)
-                # store initial metadata
-                self._store_metadata(validated_metadata)
+            validated_metadata = self._validate_metadata(metadata)
+            self._store_metadata(validated_metadata)
 
-                # If implicit supersession phrases were detected by the LLM/text detector, try to resolve them
-                try:
-                    if validated_metadata.get("implicit_supersedes") and not validated_metadata.get("_implicit_supersedes_applied"):
-                        self._apply_implicit_supersedes(validated_metadata)
-                except Exception as e:
-                    logger.error(f"Error applying implicit supersedes for {source_file}: {e}")
+            # If implicit supersession phrases were detected, try to resolve them
+            try:
+                if validated_metadata.get("implicit_supersedes") and not validated_metadata.get("_implicit_supersedes_applied"):
+                    self._apply_implicit_supersedes(validated_metadata)
+            except Exception as e:
+                logger.error(f"Error applying implicit supersedes for {source_file}: {e}")
 
-                return validated_metadata
-            
-            logger.warning(f"Failed to parse JSON for {source_file}, returning default metadata")
-            default_metadata = self._get_default_metadata(source_file)
-            self._store_metadata(default_metadata)
-            return default_metadata
+            return validated_metadata
             
         except Exception as e:
             logger.error(f"Error extracting metadata for {source_file}: {e}")
@@ -497,8 +518,26 @@ class DocumentProcessor:
                 for filename, extracted_text, metadata in rows:
                     if not extracted_text:
                         continue
-                    if not metadata:
+                    
+                    # Handle metadata properly - could be JSON string or None
+                    if metadata:
+                        # If metadata exists, it should be a JSON string from the database
+                        try:
+                            if isinstance(metadata, str):
+                                metadata = json.loads(metadata)
+                            # Ensure it's a dictionary
+                            if not isinstance(metadata, dict):
+                                metadata = self._extract_metadata(extracted_text, filename)
+                        except (json.JSONDecodeError, TypeError):
+                            # If JSON parsing fails, extract fresh metadata
+                            metadata = self._extract_metadata(extracted_text, filename)
+                    else:
+                        # No metadata exists, extract it
                         metadata = self._extract_metadata(extracted_text, filename)
+                    
+                    # Ensure metadata is not None
+                    if not metadata:
+                        metadata = self._get_default_metadata(filename)
                     text_splitter = RecursiveCharacterTextSplitter(
                         chunk_size=self.chunk_size,
                         chunk_overlap=self.chunk_overlap,

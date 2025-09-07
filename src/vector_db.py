@@ -161,6 +161,7 @@ class VectorDatabaseManager:
             # Step 2: Import graph manager and validate documents
             from src.graph_manager import Neo4jManager
             graph_manager = Neo4jManager()
+            graph_manager.connect()
             
             all_hits = []  # Keep ALL relevant hits
             replacement_candidates = set()
@@ -280,6 +281,11 @@ class VectorDatabaseManager:
             
         except Exception as e:
             logger.error(f"Failed to search with validation: {e}")
+            # Make sure to close the connection even on error
+            try:
+                graph_manager.close()
+            except:
+                pass
             # Fallback to original search method
             return self.search_similar_documents(query, limit, prefer_effective=True)
 

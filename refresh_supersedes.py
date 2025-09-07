@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 # Add src to path
 sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
 
-from document_processor import DocumentProcessor
+from src.document_processor import DocumentProcessor
 
 def main():
     """Refresh all implicit supersedes relationships in the database."""

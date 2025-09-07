@@ -270,7 +270,7 @@ class Neo4jManager:
         with self.driver.session() as session:
             result = session.run("""
                 MATCH (d:Document {circular_number: $circular_number})
-                OPTIONAL MATCH (newer:Document)-[:REPEALS|SUPERSEDES]->(d)
+                OPTIONAL MATCH (newer:Document)-[:REPEALS|SUPERSEDES|AMENDS]->(d)
                 WITH d, collect(newer) as newer_docs
                 RETURN d.circular_number as original,
                        [doc IN newer_docs | doc.circular_number] as replaced_by,
