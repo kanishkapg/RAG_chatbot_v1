@@ -153,7 +153,7 @@ class VectorDatabaseManager:
             initial_hits = self.client.query_points(
                 collection_name=self.collection_name,
                 query=query_embedding,
-                limit=limit * 3,  # Get more candidates initially
+                limit=limit,
                 with_payload=True,
                 with_vectors=False
             ).points
