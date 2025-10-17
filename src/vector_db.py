@@ -1,6 +1,6 @@
 from sentence_transformers import SentenceTransformer
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams, PointStruct
+from qdrant_client.models import Distance, VectorParams, PointStruct, PayloadSchemaType
 import os
 import httpx
 import logging
@@ -34,6 +34,28 @@ class VectorDatabaseManager:
             logger.info(f"Initialized Qdrant collection {self.collection_name}")
         else:
             logger.info(f"Qdrant collection {self.collection_name} already exists, skipping creation")
+        
+        # NEW: Create payload index for circular_number field
+        try:
+            self.client.create_payload_index(
+                collection_name=self.collection_name,
+                field_name="circular_number",
+                field_schema=PayloadSchemaType.KEYWORD
+            )
+            logger.info(f"Created payload index for circular_number field")
+        except Exception as e:
+            logger.warning(f"Payload index creation failed (might already exist): {e}")
+        
+        # Optional: Create index for other filterable fields
+        try:
+            self.client.create_payload_index(
+                collection_name=self.collection_name,
+                field_name="source",
+                field_schema=PayloadSchemaType.KEYWORD
+            )
+            logger.info(f"Created payload index for source field")
+        except Exception as e:
+            logger.warning(f"Payload index for source failed (might already exist): {e}")
 
     def get_existing_documents(self) -> set:
         """Get set of existing filenames in Qdrant."""
@@ -142,7 +164,7 @@ class VectorDatabaseManager:
             logger.error(f"Failed to search similar documents: {e}")
             return []
 
-    def search_similar_documents_with_validation(self, query: str, limit: int = 3) -> List[Dict]:
+    def search_similar_documents_with_validation(self, query: str, limit: int = 2) -> List[Dict]:
         """
         Enhanced search that includes both original and replacement documents.
         This ensures historical context is preserved while also providing current information.
@@ -158,6 +180,11 @@ class VectorDatabaseManager:
                 with_vectors=False
             ).points
             
+            print("=" * 150)
+            for hit in initial_hits:
+                circular_number = hit.payload.get("circular_number")
+                print(f"Initial Hit - ID: {hit.id}, Score: {hit.score:.4f}, Circular: {circular_number}, Issued Date: {hit.payload.get('issued_date')}, Effective Date: {hit.payload.get('effective_date')}")
+            print("=" * 150)
             # Step 2: Import graph manager and validate documents
             from src.graph_manager import Neo4jManager
             graph_manager = Neo4jManager()
@@ -259,25 +286,93 @@ class VectorDatabaseManager:
             remaining_hits = [hit for hit in all_hits if hit not in final_hits]
             while len(final_hits) < limit and remaining_hits:
                 final_hits.append(remaining_hits.pop(0))
+
+            # Step 6: NEW - Fetch all chunks for the selected documents
+            selected_circulars = set()
+            for hit in final_hits:
+                circular_num = hit.payload.get("circular_number")
+                if circular_num:
+                    selected_circulars.add(circular_num)
+            
+            logger.info(f"Fetching all chunks for {len(selected_circulars)} selected circulars: {selected_circulars}")
+            
+            # Fetch all chunks for each selected circular
+            all_chunks_by_circular = {}
+            for circular_num in selected_circulars:
+                all_chunks = self.client.scroll(
+                    collection_name=self.collection_name,
+                    scroll_filter={
+                        "must": [{"key": "circular_number", "match": {"value": circular_num}}]
+                    },
+                    limit=100,  # Adjust if documents have more chunks
+                    with_payload=True,
+                    with_vectors=False
+                )[0]
+                
+                # Sort chunks by page number to maintain document order
+                all_chunks.sort(key=lambda x: (
+                    x.payload.get("page_number", 0),
+                    x.id
+                ))
+                
+                all_chunks_by_circular[circular_num] = all_chunks
+                logger.info(f"Retrieved {len(all_chunks)} chunks for circular {circular_num}")
+            
+            # Step 7: Build final results with all chunks
+            expanded_final_hits = []
+            
+            for hit in final_hits:
+                circular_num = hit.payload.get("circular_number")
+                
+                if not circular_num:
+                    # Documents without circular number - keep as single chunk
+                    expanded_final_hits.append({
+                        "id": hit.id,
+                        "score": hit.score,
+                        "text": hit.payload["text"],
+                        "source": hit.payload["source"],
+                        "metadata": {
+                            **{k: v for k, v in hit.payload.items() if k not in ["text", "source"]},
+                            "is_superseded": False,
+                            "chunk_number": 1,
+                            "total_chunks": 1,
+                            "is_primary_hit": True
+                        }
+                    })
+                else:
+                    # Add all chunks for this circular
+                    chunks = all_chunks_by_circular.get(circular_num, [])
+                    for idx, chunk in enumerate(chunks):
+                        is_primary = chunk.id == hit.id  # Mark the original hit
+                        expanded_final_hits.append({
+                            "id": chunk.id,
+                            "score": hit.score if is_primary else 0,  # Only primary hit has relevance score
+                            "text": chunk.payload["text"],
+                            "source": chunk.payload["source"],
+                            "metadata": {
+                                **{k: v for k, v in chunk.payload.items() if k not in ["text", "source"]},
+                                "is_superseded": circular_num in superseded_circulars,
+                                "chunk_number": idx + 1,
+                                "total_chunks": len(chunks),
+                                "is_primary_hit": is_primary
+                            }
+                        })
             
             # Close the graph manager connection
             graph_manager.close()
             
-            logger.info(f"Enhanced search returned {len(final_hits)} chunks ({current_count} current, {historical_count} historical) from {len(set(hit.payload.get('circular_number', 'unknown') for hit in final_hits))} documents")
+            logger.info(f"Enhanced search returned {len(expanded_final_hits)} total chunks from {len(selected_circulars)} documents (originally {len(final_hits)} primary hits)")
+        
+            print("=" * 100)
+            print(f"FINAL RESULTS: {len(expanded_final_hits)} total chunks from {len(selected_circulars)} circulars")
+            for circular_num in selected_circulars:
+                chunk_count = sum(1 for r in expanded_final_hits if r['metadata'].get('circular_number') == circular_num)
+                primary_count = sum(1 for r in expanded_final_hits if r['metadata'].get('circular_number') == circular_num and r['metadata'].get('is_primary_hit'))
+                print(f"  - Circular {circular_num}: {chunk_count} chunks ({primary_count} primary)")
+            print("=" * 100)
             
-            return [
-                {
-                    "id": hit.id,
-                    "score": hit.score,
-                    "text": hit.payload["text"],
-                    "source": hit.payload["source"],
-                    "metadata": {
-                        **{k: v for k, v in hit.payload.items() if k not in ["text", "source"]},
-                        "is_superseded": hit.payload.get("circular_number") in superseded_circulars
-                    }
-                }
-                for hit in final_hits
-            ]
+            # Return the expanded final hits directly (already formatted as dicts)
+            return expanded_final_hits
             
         except Exception as e:
             logger.error(f"Failed to search with validation: {e}")

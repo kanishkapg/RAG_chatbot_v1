@@ -19,7 +19,7 @@ class LLMResponseGenerator:
                 messages=[{"role": "user", "content": prompt}],
                 model=self.model_name,
                 max_tokens=512,
-                temperature=0.3
+                temperature=0.2
             )
             
             return {
