@@ -1,0 +1,121 @@
+{
+  "aliases": {
+    "distress loan": {
+      "path": ["employee_benefits", "loans", "distress_loan_policy"]
+    },
+    "distress loan policy": {
+      "path": ["employee_benefits", "loans", "distress_loan_policy"]
+    },
+    "distress loan facility": {
+      "path": ["employee_benefits", "loans", "distress_loan_policy"]
+    },
+    "distress loan interest rate": {
+      "path": ["employee_benefits", "loans", "distress_loan_policy"]
+    },
+    "staff loan": { "path": ["employee_benefits", "loans"] },
+    "staff loan policy": { "path": ["employee_benefits", "loans"] },
+    "employee loan": { "path": ["employee_benefits", "loans"] },
+    "employee loan policy": { "path": ["employee_benefits", "loans"] },
+    "loan policy": { "path": ["employee_benefits", "loans"] },
+    "bill adjustment": {
+      "path": ["financial_controls", "billing_policy", "bill_adjustment_policy"]
+    },
+    "bill adjustment policy": {
+      "path": ["financial_controls", "billing_policy", "bill_adjustment_policy"]
+    },
+    "bill adjustment approval": {
+      "path": [
+        "financial_controls",
+        "billing_policy",
+        "bill_adjustment_approval_committee"
+      ]
+    },
+    "baac": {
+      "path": [
+        "financial_controls",
+        "billing_policy",
+        "bill_adjustment_approval_committee"
+      ]
+    },
+    "bill adjustment approval committee": {
+      "path": [
+        "financial_controls",
+        "billing_policy",
+        "bill_adjustment_approval_committee"
+      ]
+    },
+    "billing policy": { "path": ["financial_controls", "billing_policy"] },
+    "financial approval": {
+      "path": ["financial_controls", "delegation_of_financial_authority"]
+    },
+    "delegation of financial authority": {
+      "path": ["financial_controls", "delegation_of_financial_authority"]
+    },
+    "doa": {
+      "path": ["financial_controls", "delegation_of_financial_authority"]
+    },
+    "financial authority": {
+      "path": ["financial_controls", "delegation_of_financial_authority"]
+    },
+    "purchase approval": {
+      "path": ["financial_controls", "delegation_of_financial_authority"]
+    },
+    "budget authorization": {
+      "path": ["financial_controls", "delegation_of_financial_authority"]
+    },
+    "budget control": {
+      "path": ["financial_controls", "delegation_of_financial_authority"]
+    },
+    "tender board": {
+      "path": ["financial_controls", "delegation_of_financial_authority"]
+    },
+    "junior tender board": {
+      "path": ["financial_controls", "delegation_of_financial_authority"]
+    },
+    "senior tender board": {
+      "path": ["financial_controls", "delegation_of_financial_authority"]
+    },
+    "tree": {
+      "employee_benefits": {
+        "path": ["employee_benefits"],
+        "children": {
+          "loans": {
+            "path": ["employee_benefits", "loans"],
+            "children": {
+              "distress_loan_policy": {
+                "path": ["employee_benefits", "loans", "distress_loan_policy"]
+              }
+            }
+          }
+        }
+      },
+      "financial_controls": {
+        "path": ["financial_controls"],
+        "children": {
+          "billing_policy": {
+            "path": ["financial_controls", "billing_policy"],
+            "children": {
+              "bill_adjustment_policy": {
+                "path": [
+                  "financial_controls",
+                  "billing_policy",
+                  "bill_adjustment_policy"
+                ]
+              },
+              "bill_adjustment_approval_committee": {
+                "path": [
+                  "financial_controls",
+                  "billing_policy",
+                  "bill_adjustment_approval_committee"
+                ]
+              }
+            }
+          },
+          "delegation_of_financial_authority": {
+            "path": ["financial_controls", "delegation_of_financial_authority"]
+          }
+        }
+      }
+    }
+  }
+}
